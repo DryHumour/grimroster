@@ -171,14 +171,16 @@ const (
 type SkillMatchStatus string
 
 const (
-	SkillMatchStatusMatchedRecordID SkillMatchStatus = "matched_record_id"
-	SkillMatchStatusMatchedTexture  SkillMatchStatus = "matched_texture"
-	SkillMatchStatusNoDatabase      SkillMatchStatus = "no_database"
-	SkillMatchStatusNoARZRecord     SkillMatchStatus = "no_arz_record"
-	SkillMatchStatusNoJoinKey       SkillMatchStatus = "no_join_key"
-	SkillMatchStatusNoHTMLNode      SkillMatchStatus = "no_html_node"
-	SkillMatchStatusAmbiguous       SkillMatchStatus = "ambiguous_candidates"
-	SkillMatchStatusUnusedHTMLNode  SkillMatchStatus = "unused_html_node"
+	SkillMatchStatusMatchedRecordID   SkillMatchStatus = "matched_record_id"
+	SkillMatchStatusMatchedTexture    SkillMatchStatus = "matched_texture"
+	SkillMatchStatusNoDatabase        SkillMatchStatus = "no_database"
+	SkillMatchStatusNoARZRecord       SkillMatchStatus = "no_arz_record"
+	SkillMatchStatusNoJoinKey         SkillMatchStatus = "no_join_key"
+	SkillMatchStatusNoHTMLNode        SkillMatchStatus = "no_html_node"
+	SkillMatchStatusAmbiguous         SkillMatchStatus = "ambiguous_candidates"
+	SkillMatchStatusRecordIDConflict  SkillMatchStatus = "record_id_conflict"
+	SkillMatchStatusUnmatchedInvested SkillMatchStatus = "unmatched_invested"
+	SkillMatchStatusUnusedHTMLNode    SkillMatchStatus = "unused_html_node"
 )
 
 type SkillNameResolution string

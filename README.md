@@ -42,11 +42,15 @@ a gear bonus alone is not investment.
 
 `match_status` reports whether a skill matched by record ID or texture, or why
 correlation was not established (`no_database`, `no_arz_record`, `no_join_key`,
-`ambiguous_candidates`, `unused_html_node`, or `no_html_node`). The numeric
-class directory relationship of a mastery bar is first derived from ordinary
-mastery skills successfully matched to gd-edit. If that evidence is unavailable,
-the merger uses the documented base-game `playerclass01`–`playerclass09`
-identity mapping; it does not derive mastery labels from filenames.
+`ambiguous_candidates`, `record_id_conflict`, `unmatched_invested`,
+`unused_html_node`, or `no_html_node`). `unused_html_node` is reserved for
+zero-investment tree observations; positive unmatched observations are reported
+as `unmatched_invested`. Explicit but conflicting record IDs prevent texture
+fallback from joining the records. The numeric class directory relationship of
+a mastery bar is first derived from ordinary mastery skills successfully
+matched to gd-edit. If that evidence is unavailable, the merger uses the
+documented base-game `playerclass01`–`playerclass09` identity mapping; it does
+not derive mastery labels from filenames.
 
 For save-backed skills without a gd-edit name, ARZ enrichment retains the
 skill's display localization tag as `display_tag`. `name_resolution` indicates

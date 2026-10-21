@@ -192,6 +192,7 @@ func MergeWithDatabase(grim character.Character, sheet gdedit.Data, database *ar
 func mergeSkills(result *character.Character, observations []gdedit.SkillObservation, database *arz.Database) error {
 	matched := make([]bool, len(observations))
 	ambiguousObservations := make([]bool, len(observations))
+	conflictingRecordIDs := make([]bool, len(observations))
 	for i := range result.Skills {
 		skill := &result.Skills[i]
 		if skill.Category == "" {
@@ -292,6 +293,11 @@ func mergeSkills(result *character.Character, observations []gdedit.SkillObserva
 		for texture, grimIndices := range grimSkillsByTexture {
 			for _, grimIndex := range grimIndices {
 				for _, sheetIndex := range sheetSkillsByTexture[texture] {
+					if recordIDsConflict(result.Skills[grimIndex].RecordID, observations[sheetIndex].RecordID) {
+						conflictingRecordIDs[sheetIndex] = true
+						result.Skills[grimIndex].MatchStatus = character.SkillMatchStatusRecordIDConflict
+						continue
+					}
 					if grimCandidates[grimIndex] == nil {
 						grimCandidates[grimIndex] = make(map[int]struct{})
 					}
@@ -346,10 +352,14 @@ func mergeSkills(result *character.Character, observations []gdedit.SkillObserva
 		switch {
 		case database == nil:
 			status = character.SkillMatchStatusNoDatabase
+		case conflictingRecordIDs[index]:
+			status = character.SkillMatchStatusRecordIDConflict
 		case ambiguousObservations[index]:
 			status = character.SkillMatchStatusAmbiguous
 		case observation.JoinKey == "":
 			status = character.SkillMatchStatusNoJoinKey
+		case observation.Level > 0:
+			status = character.SkillMatchStatusUnmatchedInvested
 		}
 		if database != nil && observation.Mastery != "" && observation.Level > 0 {
 			if err := addDiagnostic(
@@ -421,6 +431,13 @@ func applySkillObservation(result *character.Character, skillIndex int, observat
 		}
 	}
 	return nil
+}
+
+func recordIDsConflict(grimRecordID, sheetRecordID string) bool {
+	if grimRecordID == "" || sheetRecordID == "" {
+		return false
+	}
+	return !strings.EqualFold(strings.TrimSpace(grimRecordID), strings.TrimSpace(sheetRecordID))
 }
 
 func resolveMasteryBars(result *character.Character) {

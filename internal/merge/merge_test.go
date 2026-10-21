@@ -258,6 +258,7 @@ func TestMergeWarnsForUnmatchedInvestedSkillsButNotUninvestedNodes(t *testing.T)
 	assert.False(t, got.Skills[0].GDEditOnly)
 	assert.True(t, got.Skills[1].GDEditOnly)
 	assert.True(t, got.Skills[2].GDEditOnly)
+	assert.Equal(t, character.SkillMatchStatusUnmatchedInvested, got.Skills[1].MatchStatus)
 	assert.Equal(t, character.SkillMatchStatusUnusedHTMLNode, got.Skills[2].MatchStatus)
 	require.Len(t, got.Diagnostics, 1)
 	assert.Equal(t, character.SeverityWarning, got.Diagnostics[0].Severity)
@@ -539,6 +540,50 @@ func TestMergeUsesStableRecordIDBeforeAmbiguousTextures(t *testing.T) {
 	assert.Equal(t, character.SkillMatchStatusMatchedRecordID, got.Skills[1].MatchStatus)
 	assert.Equal(t, uint32(2), got.Skills[1].Level)
 	assert.Empty(t, got.Diagnostics)
+}
+
+func TestMergeDoesNotFallbackAcrossConflictingExplicitRecordIDs(t *testing.T) {
+	t.Parallel()
+
+	const texture = "ui/skills/icons/shared.tex"
+	database, err := arz.New(arzlib.Encode([]arzlib.EncRec{
+		{
+			Name: "records/skills/playerclass01/save-skill.dbr",
+			Strings: map[string][]string{
+				"skillUpBitmapName": {texture},
+			},
+		},
+		{
+			Name: "records/skills/playerclass01/html-skill.dbr",
+			Strings: map[string][]string{
+				"skillUpBitmapName": {texture},
+			},
+		},
+	}))
+	require.NoError(t, err)
+
+	got, err := MergeWithDatabase(character.Character{Skills: []character.Skill{{
+		RecordID: "records/skills/playerclass01/save-skill.dbr",
+		Level:    4,
+	}}}, gdedit.Data{Skills: []gdedit.SkillObservation{{
+		RecordID: "records/skills/playerclass01/html-skill.dbr",
+		Mastery:  "Soldier",
+		Name:     "Conflicting Node",
+		Level:    4,
+		JoinKey:  texture,
+	}}}, database)
+	require.NoError(t, err)
+	require.Len(t, got.Skills, 2)
+	assert.Equal(t, "records/skills/playerclass01/save-skill.dbr", got.Skills[0].RecordID)
+	assert.Empty(t, got.Skills[0].Name)
+	assert.Equal(t, character.SkillMatchStatusRecordIDConflict, got.Skills[0].MatchStatus)
+	assert.True(t, got.Skills[1].GDEditOnly)
+	assert.Equal(t, "records/skills/playerclass01/html-skill.dbr", got.Skills[1].RecordID)
+	assert.Equal(t, "Conflicting Node", got.Skills[1].Name)
+	assert.Equal(t, character.SkillMatchStatusRecordIDConflict, got.Skills[1].MatchStatus)
+	assert.Equal(t, uint32(4), got.Skills[1].GDEditLevel)
+	require.Len(t, got.Diagnostics, 1)
+	assert.Equal(t, character.DiagnosticCodeSkillUnmatchedInvested, got.Diagnostics[0].Code)
 }
 
 func TestMergeEnrichesEquippedAndBagItemsFromARZ(t *testing.T) {
