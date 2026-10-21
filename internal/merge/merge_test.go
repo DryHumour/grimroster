@@ -258,12 +258,205 @@ func TestMergeWarnsForUnmatchedInvestedSkillsButNotUninvestedNodes(t *testing.T)
 	assert.False(t, got.Skills[0].GDEditOnly)
 	assert.True(t, got.Skills[1].GDEditOnly)
 	assert.True(t, got.Skills[2].GDEditOnly)
+	assert.Equal(t, character.SkillMatchStatusUnmatchedInvested, got.Skills[1].MatchStatus)
+	assert.Equal(t, character.SkillMatchStatusUnusedHTMLNode, got.Skills[2].MatchStatus)
 	require.Len(t, got.Diagnostics, 1)
 	assert.Equal(t, character.SeverityWarning, got.Diagnostics[0].Severity)
 	assert.Equal(t, character.DiagnosticCodeSkillUnmatchedInvested, got.Diagnostics[0].Code)
 	assert.Equal(t, `skills["Soldier":"Unknown"].level`, got.Diagnostics[0].Field)
 	assert.JSONEq(t, `null`, string(got.Diagnostics[0].GrimValue))
 	assert.JSONEq(t, `1`, string(got.Diagnostics[0].GDEditValue))
+}
+
+func TestMergeClassifiesSaveSkillsAndResolvesMasteryBars(t *testing.T) {
+	t.Parallel()
+
+	const (
+		demolitionistSkill = "records/skills/playerclass02/flametouched1.dbr"
+		inquisitorSkill    = "records/skills/playerclass07/inquisitorseal1.dbr"
+		defaultPotion      = "records/skills/default/defaulthealthpotion.dbr"
+		potionModifier     = "records/skills/itemskillsgdx3/potionmodifiers/healthpotion_healovertime.dbr"
+		potionContainer    = "records/skills/itemskillsgdx3/potionmodifiers/container_healthpotion_flask.dbr"
+	)
+	database, err := arz.New(arzlib.Encode([]arzlib.EncRec{
+		{
+			Name: demolitionistSkill,
+			Strings: map[string][]string{
+				"skillUpBitmapName": {"ui/skills/icons/flametouched.tex"},
+			},
+		},
+		{
+			Name: inquisitorSkill,
+			Strings: map[string][]string{
+				"skillUpBitmapName": {"ui/skills/icons/inquisitorseal.tex"},
+			},
+		},
+		{
+			Name: defaultPotion,
+			Strings: map[string][]string{
+				"skillDisplayName": {"tagDefaultHealthPotion"},
+			},
+		},
+		{
+			Name: potionModifier,
+			Strings: map[string][]string{
+				"skillDisplayName": {"tagHealthPotionHealOverTime"},
+			},
+		},
+		{Name: potionContainer},
+	}))
+	require.NoError(t, err)
+
+	grim := character.Character{Skills: []character.Skill{
+		{
+			RecordID:        "records/skills/playerclass02/_classtraining_class02.dbr",
+			Level:           36,
+			LevelObserved:   true,
+			Enabled:         true,
+			EnabledObserved: true,
+			SaveBacked:      true,
+		},
+		{
+			RecordID:        "records/skills/playerclass07/_classtraining_class07.dbr",
+			Level:           50,
+			LevelObserved:   true,
+			Enabled:         true,
+			EnabledObserved: true,
+			SaveBacked:      true,
+		},
+		{
+			RecordID:        demolitionistSkill,
+			Level:           3,
+			LevelObserved:   true,
+			Enabled:         true,
+			EnabledObserved: true,
+			SaveBacked:      true,
+		},
+		{
+			RecordID:        inquisitorSkill,
+			Level:           2,
+			LevelObserved:   true,
+			Enabled:         true,
+			EnabledObserved: true,
+			SaveBacked:      true,
+		},
+		{
+			RecordID:        "records/skills/default/defaultpetattack.dbr",
+			Level:           1,
+			LevelObserved:   true,
+			EnabledObserved: true,
+			SaveBacked:      true,
+		},
+		{
+			RecordID:        defaultPotion,
+			Level:           1,
+			LevelObserved:   true,
+			Enabled:         true,
+			EnabledObserved: true,
+			SaveBacked:      true,
+		},
+		{
+			RecordID:        potionModifier,
+			Level:           1,
+			LevelObserved:   true,
+			Enabled:         true,
+			EnabledObserved: true,
+			SaveBacked:      true,
+		},
+		{
+			RecordID:        potionContainer,
+			LevelObserved:   true,
+			EnabledObserved: true,
+			SaveBacked:      true,
+		},
+	}}
+	sheet := gdedit.Data{Skills: []gdedit.SkillObservation{
+		{
+			Mastery: "Demolitionist",
+			Name:    "Flame Touched",
+			Level:   3,
+			JoinKey: "ui/skills/icons/flametouched.tex",
+		},
+		{
+			Mastery: "Inquisitor",
+			Name:    "Inquisitor Seal",
+			Level:   2,
+			JoinKey: "ui/skills/icons/inquisitorseal.tex",
+		},
+		{
+			Mastery:   "Demolitionist",
+			Name:      "Uninvested gear-bonused node",
+			GearBonus: 2,
+			JoinKey:   "ui/skills/icons/unmatched.tex",
+		},
+	}}
+
+	got, err := MergeWithDatabase(grim, sheet, database)
+	require.NoError(t, err)
+	require.Len(t, got.Skills, 9)
+	assert.Equal(t, "Demolitionist", got.Skills[0].Name)
+	assert.Equal(t, "Demolitionist", got.Skills[0].Mastery)
+	assert.Equal(t, character.SkillCategoryMasteryBar, got.Skills[0].Category)
+	assert.Equal(t, uint32(36), got.Skills[0].Level)
+	assert.Equal(t, character.SkillMatchStatusNoARZRecord, got.Skills[0].MatchStatus)
+	assert.Equal(t, "Inquisitor", got.Skills[1].Name)
+	assert.Equal(t, "Inquisitor", got.Skills[1].Mastery)
+	assert.Equal(t, character.SkillCategoryMasteryBar, got.Skills[1].Category)
+	assert.Equal(t, uint32(50), got.Skills[1].Level)
+	assert.Equal(t, character.SkillMatchStatusNoARZRecord, got.Skills[1].MatchStatus)
+	assert.Equal(t, "Flame Touched", got.Skills[2].Name)
+	assert.Equal(t, character.SkillCategoryMastery, got.Skills[2].Category)
+	assert.Equal(t, uint32(3), got.Skills[2].Level)
+	assert.Equal(t, uint32(3), got.Skills[2].GDEditLevel)
+	assert.Equal(t, demolitionistSkill, got.Skills[2].RecordID)
+	assert.Equal(t, "Inquisitor Seal", got.Skills[3].Name)
+	assert.Equal(t, uint32(2), got.Skills[3].Level)
+	assert.Equal(t, character.SkillCategoryDefault, got.Skills[4].Category)
+	assert.Equal(t, character.SkillMatchStatusNoARZRecord, got.Skills[4].MatchStatus)
+	assert.Equal(t, character.SkillNameResolutionMissing, got.Skills[4].NameResolution)
+	assert.Equal(t, character.SkillCategoryDefault, got.Skills[5].Category)
+	assert.Equal(t, "tagDefaultHealthPotion", got.Skills[5].DisplayTag)
+	assert.Equal(t, character.SkillNameResolutionTagOnly, got.Skills[5].NameResolution)
+	assert.Equal(t, character.SkillCategoryPotion, got.Skills[6].Category)
+	assert.Equal(t, "tagHealthPotionHealOverTime", got.Skills[6].DisplayTag)
+	assert.Equal(t, character.SkillNameResolutionTagOnly, got.Skills[6].NameResolution)
+	assert.Equal(t, character.SkillMatchStatusNoJoinKey, got.Skills[6].MatchStatus)
+	assert.True(t, got.Skills[6].Enabled)
+	assert.True(t, got.Skills[6].EnabledObserved)
+	assert.True(t, got.Skills[6].SaveBacked)
+	assert.Equal(t, character.SkillCategoryPotion, got.Skills[7].Category)
+	assert.Equal(t, uint32(0), got.Skills[7].Level)
+	assert.False(t, got.Skills[7].Enabled)
+	assert.True(t, got.Skills[7].SaveBacked)
+	assert.Empty(t, got.Skills[7].DisplayTag)
+	assert.Equal(t, character.SkillNameResolutionMissing, got.Skills[7].NameResolution)
+	assert.Equal(t, "Uninvested gear-bonused node", got.Skills[8].Name)
+	assert.Equal(t, uint32(0), got.Skills[8].GDEditLevel)
+	assert.Equal(t, uint32(2), got.Skills[8].GearBonus)
+	assert.False(t, got.Skills[8].SaveBacked)
+	assert.False(t, got.Skills[8].EnabledObserved)
+	assert.True(t, got.Skills[8].GDEditOnly)
+	assert.Equal(t, character.SkillMatchStatusUnusedHTMLNode, got.Skills[8].MatchStatus)
+	assert.Empty(t, got.Diagnostics)
+}
+
+func TestMergeMasteryBarFallbackAndMissingDatabaseStatus(t *testing.T) {
+	t.Parallel()
+
+	got, err := Merge(character.Character{Skills: []character.Skill{
+		{RecordID: "records/skills/playerclass02/_classtraining_class02.dbr", Level: 36, SaveBacked: true},
+		{RecordID: "records/skills/playerclass07/_classtraining_class07.dbr", Level: 50, SaveBacked: true},
+		{RecordID: "records/skills/default/defaultpetattack.dbr", Level: 1, Enabled: false, SaveBacked: true},
+	}}, gdedit.Data{})
+	require.NoError(t, err)
+	require.Len(t, got.Skills, 3)
+	assert.Equal(t, "Demolitionist", got.Skills[0].Name)
+	assert.Equal(t, "Inquisitor", got.Skills[1].Name)
+	assert.Equal(t, uint32(36), got.Skills[0].Level)
+	assert.Equal(t, uint32(50), got.Skills[1].Level)
+	assert.Equal(t, character.SkillMatchStatusNoDatabase, got.Skills[2].MatchStatus)
+	assert.Equal(t, character.SkillNameResolutionNoDatabase, got.Skills[2].NameResolution)
+	assert.False(t, got.Skills[2].Enabled)
 }
 
 func TestMergeLeavesAmbiguousInvestedSkillUncorrelated(t *testing.T) {
@@ -300,8 +493,95 @@ func TestMergeLeavesAmbiguousInvestedSkillUncorrelated(t *testing.T) {
 	require.Len(t, got.Skills, 3)
 	assert.Equal(t, "records/skills/playerclass01/first.dbr", got.Skills[0].RecordID)
 	assert.Equal(t, "records/skills/playerclass01/second.dbr", got.Skills[1].RecordID)
+	assert.Equal(t, character.SkillMatchStatusAmbiguous, got.Skills[0].MatchStatus)
+	assert.Equal(t, character.SkillMatchStatusAmbiguous, got.Skills[1].MatchStatus)
 	assert.True(t, got.Skills[2].GDEditOnly)
 	assert.Empty(t, got.Skills[2].RecordID)
+	assert.Equal(t, character.SkillMatchStatusAmbiguous, got.Skills[2].MatchStatus)
+	require.Len(t, got.Diagnostics, 1)
+	assert.Equal(t, character.DiagnosticCodeSkillUnmatchedInvested, got.Diagnostics[0].Code)
+}
+
+func TestMergeUsesStableRecordIDBeforeAmbiguousTextures(t *testing.T) {
+	t.Parallel()
+
+	const texture = "ui/skills/icons/shared.tex"
+	database, err := arz.New(arzlib.Encode([]arzlib.EncRec{
+		{
+			Name: "records/skills/playerclass01/first.dbr",
+			Strings: map[string][]string{
+				"skillUpBitmapName": {texture},
+			},
+		},
+		{
+			Name: "records/skills/playerclass01/second.dbr",
+			Strings: map[string][]string{
+				"skillUpBitmapName": {texture},
+			},
+		},
+	}))
+	require.NoError(t, err)
+
+	got, err := MergeWithDatabase(character.Character{Skills: []character.Skill{
+		{RecordID: "records/skills/playerclass01/first.dbr", Level: 1, SaveBacked: true},
+		{RecordID: "records/skills/playerclass01/second.dbr", Level: 2, SaveBacked: true},
+	}}, gdedit.Data{Skills: []gdedit.SkillObservation{{
+		RecordID: "records/skills/playerclass01/second.dbr",
+		Mastery:  "Soldier",
+		Name:     "Exact Match",
+		Level:    2,
+		JoinKey:  texture,
+	}}}, database)
+	require.NoError(t, err)
+	require.Len(t, got.Skills, 2)
+	assert.Empty(t, got.Skills[0].Name)
+	assert.Equal(t, character.SkillMatchStatusNoHTMLNode, got.Skills[0].MatchStatus)
+	assert.Equal(t, "Exact Match", got.Skills[1].Name)
+	assert.Equal(t, character.SkillMatchStatusMatchedRecordID, got.Skills[1].MatchStatus)
+	assert.Equal(t, uint32(2), got.Skills[1].Level)
+	assert.Empty(t, got.Diagnostics)
+}
+
+func TestMergeDoesNotFallbackAcrossConflictingExplicitRecordIDs(t *testing.T) {
+	t.Parallel()
+
+	const texture = "ui/skills/icons/shared.tex"
+	database, err := arz.New(arzlib.Encode([]arzlib.EncRec{
+		{
+			Name: "records/skills/playerclass01/save-skill.dbr",
+			Strings: map[string][]string{
+				"skillUpBitmapName": {texture},
+			},
+		},
+		{
+			Name: "records/skills/playerclass01/html-skill.dbr",
+			Strings: map[string][]string{
+				"skillUpBitmapName": {texture},
+			},
+		},
+	}))
+	require.NoError(t, err)
+
+	got, err := MergeWithDatabase(character.Character{Skills: []character.Skill{{
+		RecordID: "records/skills/playerclass01/save-skill.dbr",
+		Level:    4,
+	}}}, gdedit.Data{Skills: []gdedit.SkillObservation{{
+		RecordID: "records/skills/playerclass01/html-skill.dbr",
+		Mastery:  "Soldier",
+		Name:     "Conflicting Node",
+		Level:    4,
+		JoinKey:  texture,
+	}}}, database)
+	require.NoError(t, err)
+	require.Len(t, got.Skills, 2)
+	assert.Equal(t, "records/skills/playerclass01/save-skill.dbr", got.Skills[0].RecordID)
+	assert.Empty(t, got.Skills[0].Name)
+	assert.Equal(t, character.SkillMatchStatusRecordIDConflict, got.Skills[0].MatchStatus)
+	assert.True(t, got.Skills[1].GDEditOnly)
+	assert.Equal(t, "records/skills/playerclass01/html-skill.dbr", got.Skills[1].RecordID)
+	assert.Equal(t, "Conflicting Node", got.Skills[1].Name)
+	assert.Equal(t, character.SkillMatchStatusRecordIDConflict, got.Skills[1].MatchStatus)
+	assert.Equal(t, uint32(4), got.Skills[1].GDEditLevel)
 	require.Len(t, got.Diagnostics, 1)
 	assert.Equal(t, character.DiagnosticCodeSkillUnmatchedInvested, got.Diagnostics[0].Code)
 }

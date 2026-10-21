@@ -238,8 +238,22 @@ func (d *Database) RecordIDsWithPrefix(prefix string) []string {
 	return result
 }
 
+func (d *Database) HasRecord(recordID string) bool {
+	_, ok := d.records[recordID]
+	return ok
+}
+
+func (d *Database) SkillDisplayTag(recordID string) (string, bool, error) {
+	tag, found, err := d.StringField(recordID, "skillDisplayName")
+	if err != nil {
+		return "", false, fmt.Errorf("read skill display tag from %q: %w", recordID, err)
+	}
+	return tag, found && tag != "", nil
+}
+
 func (d *Database) Enrich(input character.Character) (character.Character, error) {
 	result := input
+	result.Skills = slices.Clone(input.Skills)
 	result.Inventory.Equipment = slices.Clone(input.Inventory.Equipment)
 	result.Inventory.Bags = slices.Clone(input.Inventory.Bags)
 	for i := range result.Inventory.Bags {
@@ -249,6 +263,22 @@ func (d *Database) Enrich(input character.Character) (character.Character, error
 	for i := range result.Inventory.Equipment {
 		if err := d.enrichItem(&result.Inventory.Equipment[i].Item); err != nil {
 			return character.Character{}, err
+		}
+	}
+	for i := range result.Skills {
+		skill := &result.Skills[i]
+		if skill.RecordID == "" || skill.Name != "" || skill.DisplayTag != "" {
+			continue
+		}
+		tag, found, err := d.SkillDisplayTag(skill.RecordID)
+		if err != nil {
+			return character.Character{}, fmt.Errorf("enrich skill %q: %w", skill.RecordID, err)
+		}
+		if found {
+			skill.DisplayTag = tag
+			skill.NameResolution = character.SkillNameResolutionTagOnly
+		} else {
+			skill.NameResolution = character.SkillNameResolutionMissing
 		}
 	}
 	for i := range result.Inventory.Bags {

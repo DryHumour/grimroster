@@ -190,18 +190,92 @@ func MergeWithDatabase(grim character.Character, sheet gdedit.Data, database *ar
 }
 
 func mergeSkills(result *character.Character, observations []gdedit.SkillObservation, database *arz.Database) error {
+	matched := make([]bool, len(observations))
+	ambiguousObservations := make([]bool, len(observations))
+	conflictingRecordIDs := make([]bool, len(observations))
+	for i := range result.Skills {
+		skill := &result.Skills[i]
+		if skill.Category == "" {
+			skill.Category = character.ClassifySkillCategory(skill.RecordID, skill.IsDevotion)
+		}
+		if database == nil {
+			skill.MatchStatus = character.SkillMatchStatusNoDatabase
+			continue
+		}
+		if !database.HasRecord(skill.RecordID) {
+			skill.MatchStatus = character.SkillMatchStatusNoARZRecord
+			continue
+		}
+		textures, err := skillTextures(database, skill.RecordID)
+		if err != nil {
+			return fmt.Errorf("resolve skill texture for %q: %w", skill.RecordID, err)
+		}
+		if len(textures) == 0 {
+			skill.MatchStatus = character.SkillMatchStatusNoJoinKey
+			continue
+		}
+		skill.MatchStatus = character.SkillMatchStatusNoHTMLNode
+	}
+
+	// Stable record IDs take precedence when newer gd-edit exports include them.
+	grimByID := make(map[string][]int)
+	sheetByID := make(map[string][]int)
+	for i := range result.Skills {
+		if recordID := strings.ToLower(result.Skills[i].RecordID); recordID != "" {
+			grimByID[recordID] = append(grimByID[recordID], i)
+		}
+	}
+	for i, observation := range observations {
+		if recordID := strings.ToLower(observation.RecordID); recordID != "" {
+			sheetByID[recordID] = append(sheetByID[recordID], i)
+		}
+	}
+	for sheetIndex, observation := range observations {
+		recordID := strings.ToLower(observation.RecordID)
+		if recordID == "" {
+			continue
+		}
+		sheetIndices := sheetByID[recordID]
+		if sheetIndex != sheetIndices[0] {
+			continue
+		}
+		grimIndices := grimByID[recordID]
+		if len(sheetIndices) != 1 || len(grimIndices) != 1 {
+			for _, sheetIndex := range sheetIndices {
+				ambiguousObservations[sheetIndex] = true
+			}
+			for _, grimIndex := range grimIndices {
+				result.Skills[grimIndex].MatchStatus = character.SkillMatchStatusAmbiguous
+			}
+			continue
+		}
+		grimIndex := grimIndices[0]
+		if matched[sheetIndex] {
+			continue
+		}
+		if err := applySkillObservation(result, grimIndex, observations[sheetIndex], character.SkillMatchStatusMatchedRecordID); err != nil {
+			return err
+		}
+		matched[sheetIndex] = true
+	}
+
 	sheetSkillsByTexture := make(map[string][]int)
 	for index, observation := range observations {
+		if matched[index] || observation.JoinKey == "" {
+			continue
+		}
 		texture := normalizeTexture(observation.JoinKey)
 		if texture != "" {
 			sheetSkillsByTexture[texture] = append(sheetSkillsByTexture[texture], index)
 		}
 	}
 
-	matched := make([]bool, len(observations))
 	if database != nil {
 		grimSkillsByTexture := make(map[string][]int)
 		for i := range result.Skills {
+			if result.Skills[i].MatchStatus == character.SkillMatchStatusMatchedRecordID {
+				continue
+			}
 			textures, err := skillTextures(database, result.Skills[i].RecordID)
 			if err != nil {
 				return fmt.Errorf("resolve skill texture for %q: %w", result.Skills[i].RecordID, err)
@@ -219,6 +293,11 @@ func mergeSkills(result *character.Character, observations []gdedit.SkillObserva
 		for texture, grimIndices := range grimSkillsByTexture {
 			for _, grimIndex := range grimIndices {
 				for _, sheetIndex := range sheetSkillsByTexture[texture] {
+					if recordIDsConflict(result.Skills[grimIndex].RecordID, observations[sheetIndex].RecordID) {
+						conflictingRecordIDs[sheetIndex] = true
+						result.Skills[grimIndex].MatchStatus = character.SkillMatchStatusRecordIDConflict
+						continue
+					}
 					if grimCandidates[grimIndex] == nil {
 						grimCandidates[grimIndex] = make(map[int]struct{})
 					}
@@ -230,8 +309,19 @@ func mergeSkills(result *character.Character, observations []gdedit.SkillObserva
 				}
 			}
 		}
+		for grimIndex, candidates := range grimCandidates {
+			if len(candidates) > 1 {
+				result.Skills[grimIndex].MatchStatus = character.SkillMatchStatusAmbiguous
+			}
+		}
 		for sheetIndex, candidates := range sheetCandidates {
+			if matched[sheetIndex] || len(candidates) == 0 {
+				continue
+			}
 			if len(candidates) != 1 {
+				for grimIndex := range candidates {
+					result.Skills[grimIndex].MatchStatus = character.SkillMatchStatusAmbiguous
+				}
 				continue
 			}
 			var grimIndex int
@@ -239,33 +329,17 @@ func mergeSkills(result *character.Character, observations []gdedit.SkillObserva
 				grimIndex = candidate
 			}
 			if len(grimCandidates[grimIndex]) != 1 {
+				result.Skills[grimIndex].MatchStatus = character.SkillMatchStatusAmbiguous
 				continue
 			}
-
-			observation := observations[sheetIndex]
+			if err := applySkillObservation(result, grimIndex, observations[sheetIndex], character.SkillMatchStatusMatchedTexture); err != nil {
+				return err
+			}
 			matched[sheetIndex] = true
-			skill := &result.Skills[grimIndex]
-			skill.Name = observation.Name
-			skill.Mastery = observation.Mastery
-			skill.GDEditLevel = observation.Level
-			skill.GearBonus = observation.GearBonus
-			skill.MaxLevel = observation.MaxLevel
-			skill.UltimateLevel = observation.UltimateLevel
-			skill.Description = observation.Description
-			skill.Current = slices.Clone(observation.Current)
-			skill.Next = slices.Clone(observation.Next)
-			if skill.Level != observation.Level {
-				if err := addDiagnostic(
-					result,
-					character.SeverityWarning,
-					character.DiagnosticCodeSkillLevelMismatch,
-					"Skill level differs between grim and gd-edit.",
-					"skills["+skill.RecordID+"].level",
-					skill.Level,
-					observation.Level,
-				); err != nil {
-					return err
-				}
+		}
+		for sheetIndex, candidates := range sheetCandidates {
+			if !matched[sheetIndex] && len(candidates) > 0 {
+				ambiguousObservations[sheetIndex] = true
 			}
 		}
 	}
@@ -273,6 +347,19 @@ func mergeSkills(result *character.Character, observations []gdedit.SkillObserva
 	for index, observation := range observations {
 		if matched[index] {
 			continue
+		}
+		status := character.SkillMatchStatusUnusedHTMLNode
+		switch {
+		case database == nil:
+			status = character.SkillMatchStatusNoDatabase
+		case conflictingRecordIDs[index]:
+			status = character.SkillMatchStatusRecordIDConflict
+		case ambiguousObservations[index]:
+			status = character.SkillMatchStatusAmbiguous
+		case observation.JoinKey == "":
+			status = character.SkillMatchStatusNoJoinKey
+		case observation.Level > 0:
+			status = character.SkillMatchStatusUnmatchedInvested
 		}
 		if database != nil && observation.Mastery != "" && observation.Level > 0 {
 			if err := addDiagnostic(
@@ -288,8 +375,10 @@ func mergeSkills(result *character.Character, observations []gdedit.SkillObserva
 			}
 		}
 		result.Skills = append(result.Skills, character.Skill{
+			RecordID:      observation.RecordID,
 			Name:          observation.Name,
 			Mastery:       observation.Mastery,
+			Category:      character.ClassifySkillCategory(observation.RecordID, false),
 			GDEditLevel:   observation.Level,
 			GearBonus:     observation.GearBonus,
 			MaxLevel:      observation.MaxLevel,
@@ -298,10 +387,127 @@ func mergeSkills(result *character.Character, observations []gdedit.SkillObserva
 			Current:       slices.Clone(observation.Current),
 			Next:          slices.Clone(observation.Next),
 			GDEditOnly:    true,
+			MatchStatus:   status,
 		})
+		if result.Skills[len(result.Skills)-1].Category == character.SkillCategoryOther {
+			result.Skills[len(result.Skills)-1].Category = character.SkillCategoryMastery
+		}
 	}
 
+	resolveMasteryBars(result)
+	if database == nil {
+		for i := range result.Skills {
+			if result.Skills[i].Name == "" && result.Skills[i].RecordID != "" {
+				result.Skills[i].NameResolution = character.SkillNameResolutionNoDatabase
+			}
+		}
+	}
 	return nil
+}
+
+func applySkillObservation(result *character.Character, skillIndex int, observation gdedit.SkillObservation, status character.SkillMatchStatus) error {
+	skill := &result.Skills[skillIndex]
+	skill.Name = observation.Name
+	skill.Mastery = observation.Mastery
+	skill.GDEditLevel = observation.Level
+	skill.GearBonus = observation.GearBonus
+	skill.MaxLevel = observation.MaxLevel
+	skill.UltimateLevel = observation.UltimateLevel
+	skill.Description = observation.Description
+	skill.Current = slices.Clone(observation.Current)
+	skill.Next = slices.Clone(observation.Next)
+	skill.MatchStatus = status
+	if skill.Level != observation.Level {
+		if err := addDiagnostic(
+			result,
+			character.SeverityWarning,
+			character.DiagnosticCodeSkillLevelMismatch,
+			"Skill level differs between grim and gd-edit.",
+			"skills["+skill.RecordID+"].level",
+			skill.Level,
+			observation.Level,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func recordIDsConflict(grimRecordID, sheetRecordID string) bool {
+	if grimRecordID == "" || sheetRecordID == "" {
+		return false
+	}
+	return !strings.EqualFold(strings.TrimSpace(grimRecordID), strings.TrimSpace(sheetRecordID))
+}
+
+func resolveMasteryBars(result *character.Character) {
+	// A matched skill's playerclass directory ties its gd-edit mastery label to its save bar.
+	masteryByClass := make(map[string]string)
+	for _, skill := range result.Skills {
+		if skill.Category != character.SkillCategoryMastery || skill.Mastery == "" {
+			continue
+		}
+		classID := skillClassDirectory(skill.RecordID)
+		if classID != "" && masteryByClass[classID] == "" {
+			masteryByClass[classID] = skill.Mastery
+		}
+	}
+	for i := range result.Skills {
+		skill := &result.Skills[i]
+		if skill.Category != character.SkillCategoryMasteryBar {
+			continue
+		}
+		mastery := masteryByClass[skillClassDirectory(skill.RecordID)]
+		if mastery == "" {
+			mastery = fallbackMasteryName(skill.RecordID)
+		}
+		if mastery == "" {
+			continue
+		}
+		skill.Mastery = mastery
+		if skill.Name == "" {
+			skill.Name = mastery
+		}
+	}
+}
+
+func skillClassDirectory(recordID string) string {
+	const skillsPrefix = "records/skills/"
+	normalized := strings.ToLower(recordID)
+	if !strings.HasPrefix(normalized, skillsPrefix) {
+		return ""
+	}
+	remaining := strings.TrimPrefix(normalized, skillsPrefix)
+	classDirectory, _, found := strings.Cut(remaining, "/")
+	if !found || !strings.HasPrefix(classDirectory, "playerclass") {
+		return ""
+	}
+	return classDirectory
+}
+
+func fallbackMasteryName(recordID string) string {
+	switch skillClassDirectory(recordID) {
+	case "playerclass01":
+		return "Soldier"
+	case "playerclass02":
+		return "Demolitionist"
+	case "playerclass03":
+		return "Occultist"
+	case "playerclass04":
+		return "Nightblade"
+	case "playerclass05":
+		return "Arcanist"
+	case "playerclass06":
+		return "Shaman"
+	case "playerclass07":
+		return "Inquisitor"
+	case "playerclass08":
+		return "Necromancer"
+	case "playerclass09":
+		return "Oathkeeper"
+	default:
+		return ""
+	}
 }
 
 func mergeDevotions(result *character.Character, observations []gdedit.Devotion, database *arz.Database) error {
