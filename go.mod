@@ -5,13 +5,14 @@ go 1.27.2
 tool github.com/spf13/cobra-cli
 
 require (
+	codeberg.org/alex-ilchukov/arc0 v1.0.0
 	codeberg.org/alex-ilchukov/arz/v2 v2.1.0
+	codeberg.org/alex-ilchukov/lz4 v1.0.0
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/sys v0.0.0-20211210111614-af8b64212486
 )
 
 require (
-	codeberg.org/alex-ilchukov/lz4 v1.0.0 // indirect
 	codeberg.org/alex-ilchukov/sets v1.0.0 // indirect
 	codeberg.org/alex-ilchukov/vals v1.0.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect

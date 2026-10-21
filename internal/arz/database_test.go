@@ -265,6 +265,61 @@ func TestDevotionConstellationsJoinsBackgroundAndButtonRecords(t *testing.T) {
 	}, constellations[0].Stars)
 }
 
+func TestFactionCatalogUsesStableARZIdentitiesAndThresholdTags(t *testing.T) {
+	t.Parallel()
+
+	gameFactions := arzlib.EncRec{
+		Name: "records/game/gamefactions.dbr",
+		Ints: map[string][]int32{
+			"factionValue1": {-20000},
+			"factionValue2": {-8000},
+			"factionValue3": {-1500},
+			"factionValue4": {0},
+			"factionValue5": {1500},
+			"factionValue6": {5000},
+			"factionValue7": {10000},
+			"factionValue8": {25000},
+		},
+		Strings: map[string][]string{
+			"factionUser8":      {"records/controllers/factions/kymons.dbr"},
+			"factionAetherials": {"records/controllers/factions/aetherials.dbr"},
+			"factionTag1":       {"tagFactionStateEnemy5"},
+			"factionTag2":       {"tagFactionStateEnemy4"},
+			"factionTag3":       {"tagFactionStateEnemy2"},
+			"factionTag4":       {"tagFactionStateNeutral"},
+			"factionTag5":       {"tagFactionStateFriend1"},
+			"factionTag6":       {"tagFactionStateFriend2"},
+			"factionTag7":       {"tagFactionStateFriend4"},
+			"factionTag8":       {"tagFactionStateFriend5"},
+		},
+	}
+	database, err := arz.New(arzlib.Encode([]arzlib.EncRec{
+		gameFactions,
+		{
+			Name:    "records/controllers/factions/kymons.dbr",
+			Strings: map[string][]string{"myFaction": {"User8"}},
+		},
+		{
+			Name:    "records/controllers/factions/aetherials.dbr",
+			Strings: map[string][]string{"myFaction": {"Aetherials"}},
+		},
+	}))
+	require.NoError(t, err)
+
+	catalog, err := database.FactionCatalog()
+	require.NoError(t, err)
+	assert.True(t, catalog.StandingThresholdsKnown)
+	require.Len(t, catalog.StandingThresholds, 8)
+	assert.Equal(t, float32(-8000), catalog.StandingThresholds[1].Minimum)
+	assert.Equal(t, "enemy4", catalog.StandingThresholds[1].Tier)
+	assert.Equal(t, "tagFactionStateEnemy4", catalog.StandingThresholds[1].Tag)
+	assert.Equal(t, "Aetherials", catalog.Definitions["Aetherials"].ID)
+	assert.Equal(t, "records/controllers/factions/aetherials.dbr", catalog.Definitions["Aetherials"].RecordID)
+	assert.Equal(t, "User8", catalog.Definitions["User8"].ID)
+	assert.Equal(t, "tagFactionUser8", catalog.Definitions["User8"].NameTag)
+	assert.Equal(t, "records/controllers/factions/kymons.dbr", catalog.Definitions["User8"].RecordID)
+}
+
 func TestOpenGameDirUsesLaterExpansionRecords(t *testing.T) {
 	t.Parallel()
 

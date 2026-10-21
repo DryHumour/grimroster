@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -20,8 +21,9 @@ type record struct {
 }
 
 type Database struct {
-	records map[string]record
-	mu      sync.Mutex
+	records      map[string]record
+	localization map[string]string
+	mu           sync.Mutex
 }
 
 func New(data []byte) (*Database, error) {
@@ -30,7 +32,10 @@ func New(data []byte) (*Database, error) {
 		return nil, fmt.Errorf("decode ARZ database: %w", err)
 	}
 
-	result := &Database{records: make(map[string]record)}
+	result := &Database{
+		records:      make(map[string]record),
+		localization: make(map[string]string),
+	}
 	result.add(db)
 	return result, nil
 }
@@ -54,7 +59,10 @@ func OpenFiles(paths ...string) (*Database, error) {
 		return nil, errors.New("no ARZ database paths provided")
 	}
 
-	result := &Database{records: make(map[string]record)}
+	result := &Database{
+		records:      make(map[string]record),
+		localization: make(map[string]string),
+	}
 	for _, path := range paths {
 		data, err := os.ReadFile(path)
 		if err != nil {
@@ -95,7 +103,29 @@ func OpenGameDir(gameDir string) (*Database, error) {
 		}
 	}
 
-	return OpenFiles(paths...)
+	database, err := OpenFiles(paths...)
+	if err != nil {
+		return nil, err
+	}
+	for _, relativePath := range []string{
+		filepath.Join("resources", "Text_EN.arc"),
+		filepath.Join("gdx1", "resources", "Text_EN.arc"),
+		filepath.Join("gdx2", "resources", "Text_EN.arc"),
+		filepath.Join("gdx3", "resources", "Text_EN.arc"),
+	} {
+		path := filepath.Join(gameDir, relativePath)
+		data, err := os.ReadFile(path)
+		// Localization is optional; faction identities remain available without it.
+		if err != nil {
+			continue
+		}
+		localization, err := decodeLocalizationARC(data)
+		if err != nil {
+			continue
+		}
+		maps.Copy(database.localization, localization)
+	}
+	return database, nil
 }
 
 func OpenInstalled() (*Database, error) {

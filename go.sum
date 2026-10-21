@@ -45,6 +45,8 @@ cloud.google.com/go/storage v1.5.0/go.mod h1:tpKbwo567HUNpVclU5sGELwQWBDZ8gh0Zeo
 cloud.google.com/go/storage v1.6.0/go.mod h1:N7U0C8pVQ/+NIKOBQyamJIeKQKkZ+mxpohlUTyfDhBk=
 cloud.google.com/go/storage v1.8.0/go.mod h1:Wv1Oy7z6Yz3DshWRJFhqM/UCfaWIRTdp0RXyy7KQOVs=
 cloud.google.com/go/storage v1.10.0/go.mod h1:FLPqc6j+Ki4BU591ie1oL6qBQGu2Bl/tZ9ullr3+Kg0=
+codeberg.org/alex-ilchukov/arc0 v1.0.0 h1:FFgx6rqDATL37JZ60p5uDOJumRJG0SePHHpbZiOF1b0=
+codeberg.org/alex-ilchukov/arc0 v1.0.0/go.mod h1:/76/hvH0h8n+8TlBIiIF5Ved9v9YmOtYQZDET7uoJl0=
 codeberg.org/alex-ilchukov/arz/v2 v2.1.0 h1:F1Muk/icOSrXQPP0y5odVBvna1F/oQ3W2LFaAfN7CgA=
 codeberg.org/alex-ilchukov/arz/v2 v2.1.0/go.mod h1:B45y/nbJ/olmTHTdyLBwtnWn9Gg0IBBZsrJQOWwWBY8=
 codeberg.org/alex-ilchukov/lz4 v1.0.0 h1:dQapJ+J6kgQM8/1m6KWjSUq2niY4E7l8To3B9I1xgTc=

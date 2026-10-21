@@ -15,10 +15,11 @@ import (
 )
 
 type file struct {
-	Header *header `json:"Header"`
-	Block2 *block2 `json:"Block2"`
-	Block3 *block3 `json:"Block3"`
-	Block8 *block8 `json:"Block8"`
+	Header  *header         `json:"Header"`
+	Block2  *block2         `json:"Block2"`
+	Block3  *block3         `json:"Block3"`
+	Block8  *block8         `json:"Block8"`
+	Block13 json.RawMessage `json:"Block13"`
 }
 
 type header struct {
@@ -147,7 +148,28 @@ func Decode(data []byte) (character.Character, error) {
 			Equipment: make([]character.EquippedItem, 0, 16),
 			Bags:      make([]character.Bag, 0, len(input.Block3.Sacks)),
 		},
-		Skills: make([]character.Skill, 0),
+		Skills:            make([]character.Skill, 0),
+		FactionDataSource: character.FactionDataSourceUnknown,
+	}
+	var factionDiagnostics []character.Diagnostic
+	if len(input.Block13) > 0 {
+		reputations, myFaction, available, err := decodeFactionBlock(input.Block13)
+		if err != nil {
+			factionDiagnostics = append(factionDiagnostics, character.Diagnostic{
+				Severity:    character.SeverityWarning,
+				Code:        character.DiagnosticCodeFactionBlockUnavailable,
+				Message:     fmt.Sprintf("Faction data is unavailable because Block13 could not be decoded: %v", err),
+				Field:       "Block13",
+				GrimValue:   jsontext.Value(input.Block13),
+				GDEditValue: jsontext.Value("null"),
+			})
+		} else {
+			result.MyFaction = myFaction
+			if available {
+				result.FactionReputations = reputations
+				result.FactionDataSource = character.FactionDataSourceGrim
+			}
+		}
 	}
 	if input.Block8 != nil {
 		result.Skills = make([]character.Skill, 0, len(input.Block8.Skills))
@@ -232,7 +254,7 @@ func Decode(data []byte) (character.Character, error) {
 	if err != nil {
 		return character.Character{}, fmt.Errorf("inspect grim block decoding errors: %w", err)
 	}
-	result.Diagnostics = blockDiagnostics
+	result.Diagnostics = append(blockDiagnostics, factionDiagnostics...)
 
 	return result, nil
 }

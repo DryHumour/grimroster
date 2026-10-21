@@ -13,25 +13,28 @@ const (
 )
 
 type Character struct {
-	Name                    string          `json:"name"`
-	ClassID                 string          `json:"class_id"`
-	ClassName               string          `json:"class_name,omitempty"`
-	ClassTag                string          `json:"class_tag,omitempty"`
-	Masteries               []string        `json:"masteries,omitempty"`
-	Level                   uint32          `json:"level"`
-	Gender                  Gender          `json:"gender"`
-	Hardcore                bool            `json:"hardcore"`
-	Expansions              uint8           `json:"expansions"`
-	Expansion               string          `json:"expansion,omitempty"`
-	Difficulty              string          `json:"difficulty,omitempty"`
-	Progress                Progression     `json:"progression"`
-	Inventory               Inventory       `json:"inventory"`
-	Skills                  []Skill         `json:"skills,omitempty"`
-	Devotions               []Devotion      `json:"devotions,omitempty"`
-	CurrentAffinities       AffinityAmounts `json:"current_affinities"`
-	CurrentAffinitiesSource AffinitySource  `json:"current_affinities_source,omitempty"`
-	Calculated              *Calculated     `json:"calculated,omitempty"`
-	Diagnostics             []Diagnostic    `json:"diagnostics,omitempty"`
+	Name                    string              `json:"name"`
+	ClassID                 string              `json:"class_id"`
+	ClassName               string              `json:"class_name,omitempty"`
+	ClassTag                string              `json:"class_tag,omitempty"`
+	Masteries               []string            `json:"masteries,omitempty"`
+	Level                   uint32              `json:"level"`
+	Gender                  Gender              `json:"gender"`
+	Hardcore                bool                `json:"hardcore"`
+	Expansions              uint8               `json:"expansions"`
+	Expansion               string              `json:"expansion,omitempty"`
+	Difficulty              string              `json:"difficulty,omitempty"`
+	Progress                Progression         `json:"progression"`
+	Inventory               Inventory           `json:"inventory"`
+	Skills                  []Skill             `json:"skills,omitempty"`
+	Devotions               []Devotion          `json:"devotions,omitempty"`
+	FactionReputations      []FactionReputation `json:"faction_reputations,omitempty"`
+	FactionDataSource       FactionDataSource   `json:"faction_data_source,omitempty"`
+	MyFaction               *FactionIdentity    `json:"my_faction,omitempty"`
+	CurrentAffinities       AffinityAmounts     `json:"current_affinities"`
+	CurrentAffinitiesSource AffinitySource      `json:"current_affinities_source,omitempty"`
+	Calculated              *Calculated         `json:"calculated,omitempty"`
+	Diagnostics             []Diagnostic        `json:"diagnostics,omitempty"`
 }
 
 type Progression struct {
@@ -95,6 +98,7 @@ const (
 	DiagnosticCodeDevotionStateMismatch         = "devotion.star_state_mismatch"
 	DiagnosticCodeDevotionBindingMismatch       = "devotion.binding_mismatch"
 	DiagnosticCodeDevotionAffinityTotalMismatch = "devotion.affinity_total_mismatch"
+	DiagnosticCodeFactionBlockUnavailable       = "faction.block_unavailable"
 )
 
 type Diagnostic struct {
@@ -289,6 +293,57 @@ const (
 	AffinitySourceARZ     AffinitySource = "arz"
 	AffinitySourceMixed   AffinitySource = "mixed"
 )
+
+type FactionDataSource string
+
+const (
+	FactionDataSourceUnknown FactionDataSource = "unknown"
+	FactionDataSourceGrim    FactionDataSource = "grim_block13"
+	FactionDataSourceARZ     FactionDataSource = "arz_thresholds"
+)
+
+type FactionIdentitySource string
+
+const (
+	FactionIdentitySourceUnknown    FactionIdentitySource = "unknown"
+	FactionIdentitySourceGrimSchema FactionIdentitySource = "grim_schema"
+	FactionIdentitySourceARZ        FactionIdentitySource = "arz_gamefactions"
+)
+
+type FactionIdentity struct {
+	ID              string                `json:"id,omitempty"`
+	Name            string                `json:"name,omitempty"`
+	NameTag         string                `json:"name_tag,omitempty"`
+	RecordID        string                `json:"record_id,omitempty"`
+	SourceIndex     uint32                `json:"source_index"`
+	Known           bool                  `json:"known"`
+	DefinitionKnown bool                  `json:"definition_known"`
+	Source          FactionIdentitySource `json:"source"`
+}
+
+type FactionStanding struct {
+	Tier      string            `json:"tier,omitempty"`
+	Name      string            `json:"name,omitempty"`
+	NameTag   string            `json:"name_tag,omitempty"`
+	Threshold float32           `json:"threshold"`
+	Known     bool              `json:"known"`
+	Source    FactionDataSource `json:"source"`
+}
+
+type FactionReputation struct {
+	Faction            FactionIdentity `json:"faction"`
+	Reputation         float32         `json:"reputation"`
+	ReputationKnown    bool            `json:"reputation_known"`
+	PositiveBoost      float32         `json:"positive_boost"`
+	PositiveBoostKnown bool            `json:"positive_boost_known"`
+	NegativeBoost      float32         `json:"negative_boost"`
+	NegativeBoostKnown bool            `json:"negative_boost_known"`
+	IsUnlocked         bool            `json:"is_unlocked"`
+	IsUnlockedKnown    bool            `json:"is_unlocked_known"`
+	IsChanged          bool            `json:"is_changed"`
+	IsChangedKnown     bool            `json:"is_changed_known"`
+	Standing           FactionStanding `json:"standing"`
+}
 
 type DevotionStar struct {
 	Name               string `json:"name"`

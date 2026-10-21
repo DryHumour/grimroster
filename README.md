@@ -90,6 +90,49 @@ direct `devo.affinities` total. Reconciliation is suppressed if per-star
 contributions cannot be established (for example, missing ARZ data or a missing
 save skill block), rather than treating those contributions as zero.
 
+Faction data is read from Grim's `Block13`; gd-edit's `window.DATA` does not
+currently export reputation data. `faction_reputations` contains one entry per
+Block13 faction slot. `faction.id` is the stable GDC faction enum translated
+to the canonical `myFaction` identity through `records/game/gamefactions.dbr`;
+`faction.source_index` is retained only as provenance and is not the identity.
+The version-5 GDC slot translation follows gd-edit's faction-index mapping
+(fixed slots Player, Survivors, Aetherials, Cthonians, Outlaws, Beasts, then
+`User0`, `User1`, and so on). Unknown Block13 versions keep reputation values
+but leave identity unresolved. ARZ controller record order and localized
+display names are never used to match reputations.
+`faction.known` reports whether the save identity could be translated;
+`faction.definition_known` reports whether the installed ARZ catalog contains
+that identity. Uncatalogued future/mod faction slots retain their raw source
+index and reputation but do not receive an inferred standing.
+
+Each entry's `reputation` is Grim's raw `Value`, with `reputation_known`
+distinguishing a known zero from unavailable data. An unlocked/changed-false
+entry with the `-1` initialization sentinel is marked unknown. `is_unlocked`,
+`is_changed`, `positive_boost`, and `negative_boost` remain separate source
+fields and are not treated as reputation. `standing` is derived from the
+authoritative `factionValue1..8` thresholds and `factionTag1..8` tags in
+`gamefactions.dbr`, choosing the greatest threshold less than or equal to the
+raw reputation; boosts are not added to that value. Its source is recorded
+independently, with the tier tag localized through `Text_EN.arc` when available.
+A missing Block13,
+an undecodable block, an unknown faction slot, or unavailable ARZ thresholds
+does not become neutral or zero. Legacy slots retain gd-edit's canonical
+readable labels. User factions carry their `tagFactionUserN` display tags,
+which `Text_EN.arc` resolves when available; otherwise names fall back to the
+stable `myFaction` token and retain the tag. `my_faction` preserves Block13's
+explicit `Faction` identity; the export does not infer faction-choice
+allegiance or hostility from reputation.
+
+There is no independent gd-edit faction-reputation total to compare with
+Block13, so no cross-source reputation-disagreement diagnostic applies. Missing
+or undecodable Block13 data remains unknown, with existing Grim block
+diagnostics preserved.
+
+Faction reputation is factual data, not a vendor-access guarantee. Future
+augment recommendations will also need an augment catalogue and its reputation
+requirements, character level/attribute requirements, equipment-slot limits,
+and vendor/quest/world-access state.
+
 On Windows, `internal/arz` can discover a Steam installation from the registry
 and load its base and installed expansion databases. Other platforms can open
 ARZ files or a game directory explicitly.
