@@ -256,6 +256,16 @@ func decodeBlockDiagnostics(data []byte) ([]character.Diagnostic, error) {
 	})
 
 	diagnostics := make([]character.Diagnostic, 0)
+	if block8, ok := values["Block8"]; !ok || block8.Kind() == jsontext.KindNull {
+		diagnostics = append(diagnostics, character.Diagnostic{
+			Severity:    character.SeverityError,
+			Code:        character.DiagnosticCodeGrimBlockMissing,
+			Message:     "grim skill data is unavailable because Block8 is missing.",
+			Field:       "Block8",
+			GrimValue:   jsontext.Value("null"),
+			GDEditValue: jsontext.Value("null"),
+		})
+	}
 	for _, name := range blockNames {
 		var block map[string]jsontext.Value
 		if err := jsonv2.Unmarshal(values[name], &block); err != nil {

@@ -75,7 +75,7 @@ func MergeWithDatabase(grim character.Character, sheet gdedit.Data, database *ar
 	if grim.Name != "" && sheet.Name != "" && grim.Name != sheet.Name {
 		if err := addDiagnostic(
 			&result,
-			character.SeverityWarning,
+			character.SeverityError,
 			character.DiagnosticCodeCharacterNameMismatch,
 			"Character name differs between grim and gd-edit.",
 			"name",
@@ -90,7 +90,7 @@ func MergeWithDatabase(grim character.Character, sheet gdedit.Data, database *ar
 	if grim.Level != 0 && sheet.Level != 0 && grim.Level != sheet.Level {
 		if err := addDiagnostic(
 			&result,
-			character.SeverityWarning,
+			character.SeverityError,
 			character.DiagnosticCodeCharacterLevelMismatch,
 			"Character level differs between grim and gd-edit.",
 			"level",
@@ -176,6 +176,14 @@ func MergeWithDatabase(grim character.Character, sheet gdedit.Data, database *ar
 			item.DisplayName = observation.Name
 		}
 		item.GDEditDetails = observation.Raw.Clone()
+	}
+
+	if database != nil {
+		enriched, err := database.Enrich(result)
+		if err != nil {
+			return character.Character{}, fmt.Errorf("enrich character items from ARZ database: %w", err)
+		}
+		result = enriched
 	}
 
 	return result, nil
@@ -266,6 +274,19 @@ func mergeSkills(result *character.Character, observations []gdedit.SkillObserva
 		if matched[index] {
 			continue
 		}
+		if database != nil && observation.Mastery != "" && observation.Level > 0 {
+			if err := addDiagnostic(
+				result,
+				character.SeverityWarning,
+				character.DiagnosticCodeSkillUnmatchedInvested,
+				"Invested gd-edit mastery skill could not be correlated to a grim skill.",
+				fmt.Sprintf("skills[%q:%q].level", observation.Mastery, observation.Name),
+				nil,
+				observation.Level,
+			); err != nil {
+				return err
+			}
+		}
 		result.Skills = append(result.Skills, character.Skill{
 			Name:          observation.Name,
 			Mastery:       observation.Mastery,
@@ -279,6 +300,7 @@ func mergeSkills(result *character.Character, observations []gdedit.SkillObserva
 			GDEditOnly:    true,
 		})
 	}
+
 	return nil
 }
 

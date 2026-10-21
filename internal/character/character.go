@@ -81,10 +81,12 @@ const (
 	DiagnosticCodeCharacterNameMismatch        = "character.name_mismatch"
 	DiagnosticCodeCharacterLevelMismatch       = "character.level_mismatch"
 	DiagnosticCodeGrimBlockDecodingError       = "grim.block_decoding_error"
+	DiagnosticCodeGrimBlockMissing             = "grim.block_missing"
 	DiagnosticCodeEquipmentUnmatched           = "equipment.unmatched"
 	DiagnosticCodeEquipmentSlotMismatch        = "equipment.slot_mismatch"
 	DiagnosticCodeEquipmentDisplayNameMismatch = "equipment.display_name_mismatch"
 	DiagnosticCodeSkillLevelMismatch           = "skill.level_mismatch"
+	DiagnosticCodeSkillUnmatchedInvested       = "skill.unmatched_invested"
 	DiagnosticCodeDevotionStateMismatch        = "devotion.star_state_mismatch"
 	DiagnosticCodeDevotionBindingMismatch      = "devotion.binding_mismatch"
 )
