@@ -75,13 +75,20 @@ records provide a fallback through their bitmap and `affinityRequired*` /
 (`gd_edit`, `arz`, `mixed`, or `unknown`). Missing totals remain unknown rather
 than being inferred as zero.
 
-When the direct total and all completed constellation reward data are known,
-the merger reconciles the total against completed rewards, including completed
-Crossroads entries. Partial constellation rewards remain potential only. A
-`devotion.affinity_total_mismatch` diagnostic reports any disagreement; its
-`grim_value` records the completed-reward calculation and `gd_edit_value`
-records the direct `devo.affinities` total. No reconciliation warning is
-emitted when required source data is missing.
+ARZ records with one devotion-button link carry an independent per-star award.
+Those awards are associated with save skill record IDs, not localized
+constellation names. This accounts for gd-edit's grouped Crossroads display:
+the current total includes each taken Crossroads star even when the displayed
+five-star group is incomplete. Ordinary multi-button constellations only grant
+their potential reward when complete.
+
+When the direct total and all required reward/taken-state data are known, the
+merger reconciles it against completed rewards and individually earned star
+awards. A `devotion.affinity_total_mismatch` diagnostic reports disagreement;
+its `grim_value` records the reward calculation and `gd_edit_value` records the
+direct `devo.affinities` total. Reconciliation is suppressed if per-star
+contributions cannot be established (for example, missing ARZ data or a missing
+save skill block), rather than treating those contributions as zero.
 
 On Windows, `internal/arz` can discover a Steam installation from the registry
 and load its base and installed expansion databases. Other platforms can open

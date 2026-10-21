@@ -10,16 +10,37 @@ import (
 )
 
 type DevotionConstellation struct {
-	DisplayTag           string
-	Bitmap               string
-	AffinityRequirements character.AffinityAmounts
-	AffinityRewards      character.AffinityAmounts
-	Stars                map[uint32][]string
+	DisplayTag                    string
+	Bitmap                        string
+	AffinityRequirements          character.AffinityAmounts
+	AffinityRewards               character.AffinityAmounts
+	AffinityRewardMode            AffinityRewardMode
+	StarAffinityRecordCount       int
+	StarAffinityRewardsKnown      bool
+	StarAffinityRewardsByRecordID map[string]character.AffinityAmounts
+	Stars                         map[uint32][]string
+}
+
+type AffinityRewardMode string
+
+const (
+	AffinityRewardModeUnknown    AffinityRewardMode = "unknown"
+	AffinityRewardModeCompletion AffinityRewardMode = "completion"
+	AffinityRewardModePerStar    AffinityRewardMode = "per_star"
+)
+
+type affinityRewardGroup struct {
+	starRecordCount    int
+	multiStarRecord    bool
+	unattributedReward bool
+	starRecordsKnown   bool
+	byRecordID         map[string]character.AffinityAmounts
 }
 
 func (d *Database) DevotionConstellations() ([]DevotionConstellation, error) {
 	constellationPrefix := "records/ui/skills/devotion/constellations/constellation"
 	constellations := make(map[string]*DevotionConstellation)
+	rewardGroups := make(map[string]*affinityRewardGroup)
 	requirementConflicts := make(map[string]map[character.Affinity]bool)
 	rewardConflicts := make(map[string]map[character.Affinity]bool)
 	for _, recordID := range d.RecordIDsWithPrefix(constellationPrefix) {
@@ -46,12 +67,17 @@ func (d *Database) DevotionConstellations() ([]DevotionConstellation, error) {
 		constellation := constellations[displayTag]
 		if constellation == nil {
 			constellation = &DevotionConstellation{
-				DisplayTag:           displayTag,
-				AffinityRequirements: requirements,
-				AffinityRewards:      rewards,
-				Stars:                make(map[uint32][]string),
+				DisplayTag:                    displayTag,
+				AffinityRequirements:          requirements,
+				AffinityRewards:               rewards,
+				StarAffinityRewardsByRecordID: make(map[string]character.AffinityAmounts),
+				Stars:                         make(map[uint32][]string),
 			}
 			constellations[displayTag] = constellation
+			rewardGroups[displayTag] = &affinityRewardGroup{
+				starRecordsKnown: true,
+				byRecordID:       make(map[string]character.AffinityAmounts),
+			}
 		} else {
 			if requirementConflicts[displayTag] == nil {
 				requirementConflicts[displayTag] = make(map[character.Affinity]bool)
@@ -94,6 +120,19 @@ func (d *Database) DevotionConstellations() ([]DevotionConstellation, error) {
 			buttonNames = append(buttonNames, name)
 		}
 		slices.Sort(buttonNames)
+		rewardGroup := rewardGroups[displayTag]
+		// A database record with one button has a one-star award; grouped records
+		// remain independent instead of being collapsed as conflicting totals.
+		switch len(buttonNames) {
+		case 1:
+			rewardGroup.starRecordCount++
+		case 0:
+			if affinityAmountsHavePoints(rewards) {
+				rewardGroup.unattributedReward = true
+			}
+		default:
+			rewardGroup.multiStarRecord = true
+		}
 		for _, fieldName := range buttonNames {
 			button, err := strconv.ParseUint(strings.TrimPrefix(fieldName, "devotionButton"), 10, 32)
 			if err != nil {
@@ -104,6 +143,15 @@ func (d *Database) DevotionConstellations() ([]DevotionConstellation, error) {
 			if err != nil {
 				return nil, fmt.Errorf("read skill name from devotion button %q: %w", buttonRecord, err)
 			}
+			if len(buttonNames) == 1 {
+				if !found || skillRecord == "" || !rewards.AllKnown() {
+					rewardGroup.starRecordsKnown = false
+				} else if _, duplicate := rewardGroup.byRecordID[skillRecord]; duplicate {
+					rewardGroup.starRecordsKnown = false
+				} else {
+					rewardGroup.byRecordID[skillRecord] = rewards
+				}
+			}
 			if found && skillRecord != "" && !slices.Contains(constellation.Stars[uint32(button)], skillRecord) {
 				constellation.Stars[uint32(button)] = append(constellation.Stars[uint32(button)], skillRecord)
 			}
@@ -111,13 +159,63 @@ func (d *Database) DevotionConstellations() ([]DevotionConstellation, error) {
 	}
 
 	result := make([]DevotionConstellation, 0, len(constellations))
-	for _, constellation := range constellations {
+	for displayTag, constellation := range constellations {
+		group := rewardGroups[displayTag]
+		switch {
+		case group.starRecordCount > 0 && !group.multiStarRecord && !group.unattributedReward:
+			constellation.AffinityRewardMode = AffinityRewardModePerStar
+			constellation.StarAffinityRecordCount = group.starRecordCount
+			constellation.StarAffinityRewardsKnown = group.starRecordsKnown &&
+				len(group.byRecordID) == group.starRecordCount
+			constellation.StarAffinityRewardsByRecordID = group.byRecordID
+			if constellation.StarAffinityRewardsKnown {
+				constellation.AffinityRewards = sumStarAffinityRewards(group.byRecordID)
+			}
+		case group.multiStarRecord && group.starRecordCount == 0 && !group.unattributedReward:
+			constellation.AffinityRewardMode = AffinityRewardModeCompletion
+		default:
+			constellation.AffinityRewardMode = AffinityRewardModeUnknown
+		}
 		result = append(result, *constellation)
 	}
 	slices.SortFunc(result, func(a, b DevotionConstellation) int {
 		return strings.Compare(a.DisplayTag, b.DisplayTag)
 	})
 	return result, nil
+}
+
+func affinityAmountsHavePoints(amounts character.AffinityAmounts) bool {
+	for _, affinity := range []character.Affinity{
+		character.AffinityAscendant,
+		character.AffinityChaos,
+		character.AffinityEldritch,
+		character.AffinityOrder,
+		character.AffinityPrimordial,
+	} {
+		value, _ := amounts.Value(affinity)
+		if value.Known && value.Points > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func sumStarAffinityRewards(rewards map[string]character.AffinityAmounts) character.AffinityAmounts {
+	result := character.KnownZeroAffinityAmounts()
+	for _, value := range rewards {
+		for _, affinity := range []character.Affinity{
+			character.AffinityAscendant,
+			character.AffinityChaos,
+			character.AffinityEldritch,
+			character.AffinityOrder,
+			character.AffinityPrimordial,
+		} {
+			current, _ := result.Value(affinity)
+			increment, _ := value.Value(affinity)
+			result.Set(affinity, current.Points+increment.Points)
+		}
+	}
+	return result
 }
 
 func (d *Database) affinityAmounts(recordID, pointsPrefix, namesPrefix string) (character.AffinityAmounts, error) {
@@ -139,13 +237,15 @@ func (d *Database) affinityAmounts(recordID, pointsPrefix, namesPrefix string) (
 		if err != nil {
 			return character.AffinityAmounts{}, fmt.Errorf("read %s%d: %w", namesPrefix, index, err)
 		}
-		if !pointsFound {
-			complete = false
-			continue
-		}
-		hasFields = true
-		if points < 0 {
+		hasFields = hasFields || pointsFound || nameFound
+		if pointsFound && points < 0 {
 			return character.AffinityAmounts{}, fmt.Errorf("field %s%d is negative", pointsPrefix, index)
+		}
+		if !pointsFound {
+			if nameFound && name != "" {
+				complete = false
+			}
+			continue
 		}
 		if points == 0 && (!nameFound || name == "") {
 			continue

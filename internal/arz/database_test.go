@@ -210,9 +210,18 @@ func TestDevotionConstellationsJoinsBackgroundAndButtonRecords(t *testing.T) {
 		},
 		{
 			Name: "records/ui/skills/devotion/constellations/constellation002.dbr",
+			Ints: map[string][]int32{
+				"affinityRequired1": {1},
+				"affinityRequired2": {0},
+				"affinityRequired3": {0},
+				"affinityGiven1":    {0},
+				"affinityGiven2":    {0},
+				"affinityGiven3":    {0},
+			},
 			Strings: map[string][]string{
 				"constellationDisplayTag": {"tagConstellation"},
 				"devotionButton2":         {"records/ui/skills/devotion/constellations/button002.dbr"},
+				"affinityRequiredName1":   {"Chaos"},
 			},
 		},
 		{
@@ -246,6 +255,10 @@ func TestDevotionConstellationsJoinsBackgroundAndButtonRecords(t *testing.T) {
 	assert.True(t, constellations[0].AffinityRewards.AllKnown())
 	assert.Equal(t, uint32(3), constellations[0].AffinityRewards.Ascendant.Points)
 	assert.Equal(t, uint32(2), constellations[0].AffinityRewards.Eldritch.Points)
+	assert.Equal(t, arz.AffinityRewardModePerStar, constellations[0].AffinityRewardMode)
+	assert.Equal(t, 2, constellations[0].StarAffinityRecordCount)
+	assert.True(t, constellations[0].StarAffinityRewardsKnown)
+	assert.Len(t, constellations[0].StarAffinityRewardsByRecordID, 2)
 	assert.Equal(t, map[uint32][]string{
 		1: {"records/skills/devotion/tier1_01a.dbr"},
 		2: {"records/skills/devotion/tier1_01b.dbr"},

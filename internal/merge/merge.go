@@ -131,10 +131,11 @@ func MergeWithDatabase(grim character.Character, sheet gdedit.Data, database *ar
 	if err := mergeSkills(&result, sheet.Skills, database); err != nil {
 		return character.Character{}, err
 	}
-	if err := mergeDevotions(&result, sheet.Devotions, database); err != nil {
+	affinityEntries := make([]devotionAffinityCalculation, 0, len(sheet.Devotions))
+	if err := mergeDevotions(&result, sheet.Devotions, database, &affinityEntries); err != nil {
 		return character.Character{}, err
 	}
-	if err := reconcileAffinityTotals(&result); err != nil {
+	if err := reconcileAffinityTotals(&result, affinityEntries); err != nil {
 		return character.Character{}, err
 	}
 
@@ -520,7 +521,20 @@ func fallbackMasteryName(recordID string) string {
 	}
 }
 
-func mergeDevotions(result *character.Character, observations []gdedit.Devotion, database *arz.Database) error {
+type devotionAffinityCalculation struct {
+	complete            bool
+	rewards             character.AffinityAmounts
+	rewardMode          arz.AffinityRewardMode
+	starRewardsKnown    bool
+	starRewardsByRecord map[string]character.AffinityAmounts
+}
+
+func mergeDevotions(
+	result *character.Character,
+	observations []gdedit.Devotion,
+	database *arz.Database,
+	affinityEntries *[]devotionAffinityCalculation,
+) error {
 	constellationsByBitmap := make(map[string][]arz.DevotionConstellation)
 	if database != nil {
 		constellations, err := database.DevotionConstellations()
@@ -552,6 +566,7 @@ func mergeDevotions(result *character.Character, observations []gdedit.Devotion,
 
 	for _, observation := range observations {
 		constellations := constellationsByBitmap[normalizeTexture(observation.JoinKey)]
+		rewardMode, starRewardsKnown, starRewardCount, starRewardsByRecord := affinityRewardDetails(constellations)
 		fallbackRequirements, fallbackRewards := arzaffinityAmounts(constellations)
 		requirements, requirementsSource := affinityAmountsWithFallback(
 			observation.AffinityRequirements,
@@ -581,7 +596,12 @@ func mergeDevotions(result *character.Character, observations []gdedit.Devotion,
 				BoundSkill: observedStar.Bound,
 				Trigger:    observedStar.Trigger,
 			}
-			recordID, found := matchDevotionRecord(constellations, observedStar.Button, skillsByRecordID)
+			var recordID string
+			found := false
+			perStarGroup := rewardMode == arz.AffinityRewardModePerStar && starRewardCount > 1
+			if !perStarGroup {
+				recordID, found = matchDevotionRecord(constellations, observedStar.Button, skillsByRecordID)
+			}
 			if found {
 				star.RecordID = recordID
 				skill := skillsByRecordID[strings.ToLower(recordID)]
@@ -674,6 +694,13 @@ func mergeDevotions(result *character.Character, observations []gdedit.Devotion,
 		}
 		devotion.Complete = devotion.StarsTotal > 0 && devotion.StarsTaken == devotion.StarsTotal
 		result.Devotions = append(result.Devotions, devotion)
+		*affinityEntries = append(*affinityEntries, devotionAffinityCalculation{
+			complete:            devotion.Complete,
+			rewards:             devotion.AffinityRewards,
+			rewardMode:          rewardMode,
+			starRewardsKnown:    starRewardsKnown,
+			starRewardsByRecord: starRewardsByRecord,
+		})
 	}
 	return nil
 }
@@ -761,34 +788,89 @@ func affinityAmountsWithFallback(
 	}
 }
 
-func reconcileAffinityTotals(result *character.Character) error {
+func affinityRewardDetails(
+	definitions []arz.DevotionConstellation,
+) (arz.AffinityRewardMode, bool, int, map[string]character.AffinityAmounts) {
+	if len(definitions) != 1 {
+		return arz.AffinityRewardModeUnknown, false, 0, nil
+	}
+	definition := definitions[0]
+	return definition.AffinityRewardMode,
+		definition.StarAffinityRewardsKnown,
+		definition.StarAffinityRecordCount,
+		maps.Clone(definition.StarAffinityRewardsByRecordID)
+}
+
+func reconcileAffinityTotals(result *character.Character, entries []devotionAffinityCalculation) error {
 	if result.CurrentAffinitiesSource == character.AffinitySourceUnknown ||
 		!result.CurrentAffinities.AllKnown() ||
-		len(result.Devotions) == 0 {
+		len(entries) == 0 {
 		return nil
 	}
 
 	calculated := character.KnownZeroAffinityAmounts()
-	for _, devotion := range result.Devotions {
-		if !devotion.Complete {
-			continue
+	usedPerStarRewards := false
+	skillsByRecordID := make(map[string]*character.Skill, len(result.Skills))
+	for i := range result.Skills {
+		skill := &result.Skills[i]
+		if skill.RecordID != "" {
+			skillsByRecordID[strings.ToLower(skill.RecordID)] = skill
 		}
-		if !devotion.AffinityRewards.AllKnown() {
+	}
+	saveSkillsAvailable := savedSkillBlockAvailable(result.Diagnostics)
+
+	for _, entry := range entries {
+		switch {
+		case entry.complete:
+			if entry.rewards.AllKnown() {
+				addAffinityAmounts(&calculated, entry.rewards)
+				continue
+			}
+			if entry.rewardMode == arz.AffinityRewardModePerStar && entry.starRewardsKnown {
+				rewards := sumAffinityRewardMap(entry.starRewardsByRecord)
+				if !rewards.AllKnown() {
+					return nil
+				}
+				addAffinityAmounts(&calculated, rewards)
+				continue
+			}
 			return nil
-		}
-		for _, affinity := range []character.Affinity{
-			character.AffinityAscendant,
-			character.AffinityChaos,
-			character.AffinityEldritch,
-			character.AffinityOrder,
-			character.AffinityPrimordial,
-		} {
-			current, _ := calculated.Value(affinity)
-			reward, _ := devotion.AffinityRewards.Value(affinity)
-			calculated.Set(affinity, current.Points+reward.Points)
+		case entry.rewardMode == arz.AffinityRewardModeCompletion:
+			// Completion rewards are potential-only until every star is taken.
+			continue
+		case entry.rewardMode == arz.AffinityRewardModePerStar:
+			if !saveSkillsAvailable || !entry.starRewardsKnown {
+				return nil
+			}
+			for recordID, rewards := range entry.starRewardsByRecord {
+				skill := skillsByRecordID[strings.ToLower(recordID)]
+				if skill == nil {
+					continue
+				}
+				taken, known := savedDevotionSkillTaken(*skill)
+				if !known {
+					return nil
+				}
+				if !taken {
+					continue
+				}
+				if !rewards.AllKnown() {
+					return nil
+				}
+				addAffinityAmounts(&calculated, rewards)
+				usedPerStarRewards = true
+			}
+		default:
+			// An incomplete constellation with unknown reward timing may contain
+			// individually awarded stars; do not treat those contributions as zero.
+			return nil
 		}
 	}
 
+	calculatedSource := "completed_constellation_rewards"
+	if usedPerStarRewards {
+		calculatedSource = "completed_constellation_and_taken_star_rewards"
+	}
 	for _, affinity := range []character.Affinity{
 		character.AffinityAscendant,
 		character.AffinityChaos,
@@ -805,12 +887,12 @@ func reconcileAffinityTotals(result *character.Character) error {
 			result,
 			character.SeverityWarning,
 			character.DiagnosticCodeDevotionAffinityTotalMismatch,
-			"Direct affinity total differs from rewards of completed constellations.",
+			"Direct affinity total differs from known completed and taken-star rewards.",
 			fmt.Sprintf("current_affinities.%s", strings.ToLower(string(affinity))),
 			struct {
 				Source string `json:"source"`
 				Points uint32 `json:"points"`
-			}{Source: "completed_constellation_rewards", Points: calculatedValue.Points},
+			}{Source: calculatedSource, Points: calculatedValue.Points},
 			struct {
 				Source string `json:"source"`
 				Points uint32 `json:"points"`
@@ -820,6 +902,51 @@ func reconcileAffinityTotals(result *character.Character) error {
 		}
 	}
 	return nil
+}
+
+func addAffinityAmounts(total *character.AffinityAmounts, increment character.AffinityAmounts) {
+	for _, affinity := range []character.Affinity{
+		character.AffinityAscendant,
+		character.AffinityChaos,
+		character.AffinityEldritch,
+		character.AffinityOrder,
+		character.AffinityPrimordial,
+	} {
+		current, _ := total.Value(affinity)
+		value, _ := increment.Value(affinity)
+		total.Set(affinity, current.Points+value.Points)
+	}
+}
+
+func sumAffinityRewardMap(rewards map[string]character.AffinityAmounts) character.AffinityAmounts {
+	total := character.KnownZeroAffinityAmounts()
+	for _, reward := range rewards {
+		if !reward.AllKnown() {
+			return character.AffinityAmounts{}
+		}
+		addAffinityAmounts(&total, reward)
+	}
+	return total
+}
+
+func savedSkillBlockAvailable(diagnostics []character.Diagnostic) bool {
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == character.DiagnosticCodeGrimBlockMissing && diagnostic.Field == "Block8" {
+			return false
+		}
+		if diagnostic.Code == character.DiagnosticCodeGrimBlockDecodingError &&
+			strings.HasPrefix(diagnostic.Field, "Block8") {
+			return false
+		}
+	}
+	return true
+}
+
+func savedDevotionSkillTaken(skill character.Skill) (bool, bool) {
+	if !skill.SaveBacked || !skill.LevelObserved || !skill.EnabledObserved {
+		return false, false
+	}
+	return skill.Enabled && skill.Level > 0 && skill.DevotionLevel > 0, true
 }
 
 func matchDevotionRecord(constellations []arz.DevotionConstellation, button uint32, skills map[string]*character.Skill) (string, bool) {
