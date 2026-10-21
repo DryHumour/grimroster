@@ -41,5 +41,10 @@ func run(args []string, output io.Writer) error {
 	if _, err := io.WriteString(output, "\n"); err != nil {
 		return fmt.Errorf("write merged character JSON: %w", err)
 	}
+	for _, diagnostic := range merged.Diagnostics {
+		if diagnostic.Severity == character.SeverityError {
+			return errors.New("merged character contains error-severity integrity diagnostics")
+		}
+	}
 	return nil
 }

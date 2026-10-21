@@ -20,7 +20,7 @@ func TestReadFilesLoadsAndMergesBothSources(t *testing.T) {
 	dir := t.TempDir()
 	grimPath := filepath.Join(dir, "grim.json")
 	htmlPath := filepath.Join(dir, "gd-edit.html")
-	require.NoError(t, os.WriteFile(grimPath, []byte(`{"Header":{"Name":"Shared","Level":10},"Block1":{"DecodingError":"unable to decode"},"Block2":{},"Block3":{}}`), 0o600))
+	require.NoError(t, os.WriteFile(grimPath, []byte(`{"Header":{"Name":"Shared","Level":10},"Block1":{"DecodingError":"unable to decode"},"Block2":{},"Block3":{},"Block8":{"Skills":[]}}`), 0o600))
 	require.NoError(t, os.WriteFile(htmlPath, []byte(`<script>window.DATA={"sheet":{"character":{"name":"Shared","level":10},"stats":{"health":100}}};</script>`), 0o600))
 
 	got, err := ReadFiles(grimPath, htmlPath)
@@ -87,9 +87,10 @@ func TestMergeKeepsGrimValuesAndRecordsDisagreements(t *testing.T) {
 		"level",
 		`inventory.equipment[slot="Medal",seed=99]`,
 	}, []string{got.Diagnostics[0].Field, got.Diagnostics[1].Field, got.Diagnostics[2].Field})
-	assert.Equal(t, character.SeverityWarning, got.Diagnostics[0].Severity)
+	assert.Equal(t, character.SeverityError, got.Diagnostics[0].Severity)
 	assert.Equal(t, character.DiagnosticCodeCharacterNameMismatch, got.Diagnostics[0].Code)
 	assert.Equal(t, "Character name differs between grim and gd-edit.", got.Diagnostics[0].Message)
+	assert.Equal(t, character.SeverityError, got.Diagnostics[1].Severity)
 	assert.Equal(t, character.DiagnosticCodeCharacterLevelMismatch, got.Diagnostics[1].Code)
 	assert.Equal(t, character.DiagnosticCodeEquipmentUnmatched, got.Diagnostics[2].Code)
 	assert.Equal(t, "gd-edit equipment item did not match a grim equipment item.", got.Diagnostics[2].Message)
@@ -228,6 +229,162 @@ func TestMergeEnrichesSkillsAndDevotionBindingsFromARZ(t *testing.T) {
 	assert.Equal(t, "Cadence", got.Devotions[0].Stars[0].BoundSkill)
 }
 
+func TestMergeWarnsForUnmatchedInvestedSkillsButNotUninvestedNodes(t *testing.T) {
+	t.Parallel()
+
+	database, err := arz.New(arzlib.Encode([]arzlib.EncRec{{
+		Name: "records/skills/playerclass01/known.dbr",
+		Strings: map[string][]string{
+			"skillUpBitmapName": {"ui/skills/icons/known.tex"},
+		},
+	}}))
+	require.NoError(t, err)
+
+	grim := character.Character{
+		Skills: []character.Skill{{
+			RecordID: "records/skills/playerclass01/known.dbr",
+			Level:    2,
+		}},
+	}
+	sheet := gdedit.Data{Skills: []gdedit.SkillObservation{
+		{Mastery: "Soldier", Name: "Known", Level: 2, JoinKey: "ui/skills/icons/known.tex"},
+		{Mastery: "Soldier", Name: "Unknown", Level: 1, JoinKey: "ui/skills/icons/missing.tex"},
+		{Mastery: "Soldier", Name: "Empty node", Level: 0, JoinKey: "ui/skills/icons/empty.tex"},
+	}}
+
+	got, err := MergeWithDatabase(grim, sheet, database)
+	require.NoError(t, err)
+	require.Len(t, got.Skills, 3)
+	assert.False(t, got.Skills[0].GDEditOnly)
+	assert.True(t, got.Skills[1].GDEditOnly)
+	assert.True(t, got.Skills[2].GDEditOnly)
+	require.Len(t, got.Diagnostics, 1)
+	assert.Equal(t, character.SeverityWarning, got.Diagnostics[0].Severity)
+	assert.Equal(t, character.DiagnosticCodeSkillUnmatchedInvested, got.Diagnostics[0].Code)
+	assert.Equal(t, `skills["Soldier":"Unknown"].level`, got.Diagnostics[0].Field)
+	assert.JSONEq(t, `null`, string(got.Diagnostics[0].GrimValue))
+	assert.JSONEq(t, `1`, string(got.Diagnostics[0].GDEditValue))
+}
+
+func TestMergeLeavesAmbiguousInvestedSkillUncorrelated(t *testing.T) {
+	t.Parallel()
+
+	database, err := arz.New(arzlib.Encode([]arzlib.EncRec{
+		{
+			Name: "records/skills/playerclass01/first.dbr",
+			Strings: map[string][]string{
+				"skillUpBitmapName": {"ui/skills/icons/shared.tex"},
+			},
+		},
+		{
+			Name: "records/skills/playerclass01/second.dbr",
+			Strings: map[string][]string{
+				"skillUpBitmapName": {"ui/skills/icons/shared.tex"},
+			},
+		},
+	}))
+	require.NoError(t, err)
+
+	got, err := MergeWithDatabase(character.Character{
+		Skills: []character.Skill{
+			{RecordID: "records/skills/playerclass01/first.dbr", Level: 1},
+			{RecordID: "records/skills/playerclass01/second.dbr", Level: 1},
+		},
+	}, gdedit.Data{Skills: []gdedit.SkillObservation{{
+		Mastery: "Soldier",
+		Name:    "Ambiguous",
+		Level:   1,
+		JoinKey: "ui/skills/icons/shared.tex",
+	}}}, database)
+	require.NoError(t, err)
+	require.Len(t, got.Skills, 3)
+	assert.Equal(t, "records/skills/playerclass01/first.dbr", got.Skills[0].RecordID)
+	assert.Equal(t, "records/skills/playerclass01/second.dbr", got.Skills[1].RecordID)
+	assert.True(t, got.Skills[2].GDEditOnly)
+	assert.Empty(t, got.Skills[2].RecordID)
+	require.Len(t, got.Diagnostics, 1)
+	assert.Equal(t, character.DiagnosticCodeSkillUnmatchedInvested, got.Diagnostics[0].Code)
+}
+
+func TestMergeEnrichesEquippedAndBagItemsFromARZ(t *testing.T) {
+	t.Parallel()
+
+	database, err := arz.New(arzlib.Encode([]arzlib.EncRec{
+		{
+			Name: "records/items/helm.dbr",
+			Strings: map[string][]string{
+				"itemNameTag": {"tagHelm"},
+			},
+		},
+		{
+			Name: "records/items/potion.dbr",
+			Strings: map[string][]string{
+				"itemNameTag": {"tagPotion"},
+			},
+		},
+	}))
+	require.NoError(t, err)
+
+	grim := character.Character{
+		Inventory: character.Inventory{
+			Equipment: []character.EquippedItem{{
+				Slot: character.SlotHead,
+				Item: character.Item{
+					RecordID:        "records/items/helm.dbr",
+					Seed:            42,
+					DisplayName:     "Localized helm",
+					PrefixID:        "records/affixes/prefix.dbr",
+					SuffixID:        "records/affixes/suffix.dbr",
+					CraftingBonusID: "records/affixes/crafting.dbr",
+					IllusionID:      "records/illusions/illusion.dbr",
+					ComponentID:     "records/components/component.dbr",
+					RelicBonusID:    "records/affixes/relic_bonus.dbr",
+					AugmentID:       "records/augments/augment.dbr",
+					AscendedAffixID: "records/affixes/ascended.dbr",
+				},
+			}},
+			Bags: []character.Bag{{
+				Items: []character.BagItem{{
+					X: 2,
+					Y: 3,
+					Item: character.Item{
+						RecordID: "records/items/potion.dbr",
+						Seed:     73,
+						Amount:   5,
+					},
+				}},
+			}},
+		},
+	}
+	sheet := gdedit.Data{Equipment: []gdedit.Equipment{{
+		Slot: "Head",
+		Name: "Localized helm",
+		Seed: 42,
+		Raw:  jsontext.Value(`{"slot":"Head","name":"Localized helm","seed":42}`),
+	}}}
+
+	got, err := MergeWithDatabase(grim, sheet, database)
+	require.NoError(t, err)
+	assert.Equal(t, "tagHelm", got.Inventory.Equipment[0].Item.NameTag)
+	assert.Equal(t, "records/items/helm.dbr", got.Inventory.Equipment[0].Item.RecordID)
+	assert.Equal(t, "Localized helm", got.Inventory.Equipment[0].Item.DisplayName)
+	assert.Equal(t, uint32(42), got.Inventory.Equipment[0].Item.Seed)
+	assert.Equal(t, "records/affixes/prefix.dbr", got.Inventory.Equipment[0].Item.PrefixID)
+	assert.Equal(t, "records/affixes/suffix.dbr", got.Inventory.Equipment[0].Item.SuffixID)
+	assert.Equal(t, "records/affixes/crafting.dbr", got.Inventory.Equipment[0].Item.CraftingBonusID)
+	assert.Equal(t, "records/illusions/illusion.dbr", got.Inventory.Equipment[0].Item.IllusionID)
+	assert.Equal(t, "records/components/component.dbr", got.Inventory.Equipment[0].Item.ComponentID)
+	assert.Equal(t, "records/affixes/relic_bonus.dbr", got.Inventory.Equipment[0].Item.RelicBonusID)
+	assert.Equal(t, "records/augments/augment.dbr", got.Inventory.Equipment[0].Item.AugmentID)
+	assert.Equal(t, "records/affixes/ascended.dbr", got.Inventory.Equipment[0].Item.AscendedAffixID)
+	assert.JSONEq(t, `{"slot":"Head","name":"Localized helm","seed":42}`, string(got.Inventory.Equipment[0].Item.GDEditDetails))
+	assert.Equal(t, "tagPotion", got.Inventory.Bags[0].Items[0].Item.NameTag)
+	assert.Equal(t, uint32(73), got.Inventory.Bags[0].Items[0].Item.Seed)
+	assert.Equal(t, uint32(5), got.Inventory.Bags[0].Items[0].Item.Amount)
+	assert.Empty(t, grim.Inventory.Equipment[0].Item.NameTag)
+	assert.Empty(t, grim.Inventory.Bags[0].Items[0].Item.NameTag)
+}
+
 func TestMergeKeepsNamedSheetSkillsAndDevotionsWithoutARZ(t *testing.T) {
 	t.Parallel()
 
@@ -259,4 +416,5 @@ func TestMergeKeepsNamedSheetSkillsAndDevotionsWithoutARZ(t *testing.T) {
 	assert.Equal(t, "Fiend", got.Devotions[0].Name)
 	assert.Equal(t, "Cadence", got.Devotions[0].Stars[0].BoundSkill)
 	assert.Empty(t, got.Devotions[0].Stars[0].RecordID)
+	assert.Empty(t, got.Diagnostics)
 }

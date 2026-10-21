@@ -14,6 +14,7 @@ func TestDecodeMapsCharacterAndInventory(t *testing.T) {
 	data := []byte(`{
 		"Header":{"Level":12,"IsMale":true,"IsHardcore":true,"Expansion":7,"Name":"Grim Name","Tag":"tagClass"},
 		"Block2":{"Level":12,"Experience":900,"AttributePoints":2,"SkillPoints":3,"DevotionPoints":4,"TotalDevotionPoints":20,"Physique":100,"Cunning":110,"Spirit":120,"Health":1300,"Energy":400},
+		"Block8":{"Skills":[]},
 		"Block3":{
 			"Head":{"Seed":123,"Amount":1,"Name":"records/items/helm.dbr","Prefix":"records/affixes/prefix.dbr","Component":"records/components/component.dbr"},
 			"LeftHand2":{"Name":""},
@@ -46,7 +47,7 @@ func TestDecodeMapsCharacterAndInventory(t *testing.T) {
 func TestDecodeUsesBlockLevelWhenHeaderLevelIsZero(t *testing.T) {
 	t.Parallel()
 
-	got, err := Decode([]byte(`{"Header":{"Name":"A"},"Block2":{"Level":9},"Block3":{}}`))
+	got, err := Decode([]byte(`{"Header":{"Name":"A"},"Block2":{"Level":9},"Block3":{},"Block8":{"Skills":[]}}`))
 	require.NoError(t, err)
 	assert.Equal(t, uint32(9), got.Level)
 	assert.Equal(t, "female", string(got.Gender))
@@ -70,6 +71,7 @@ func TestDecodeReportsNonNullBlockDecodingErrors(t *testing.T) {
 		"Block1":{"DecodingError":null},
 		"Block2":{"DecodingError":"progression could not be decoded"},
 		"Block3":{},
+		"Block8":{"Skills":[]},
 		"Block17":{"DecodingError":{"reason":"invalid data"}}
 	}`)
 
@@ -110,4 +112,23 @@ func TestDecodeImportsGrimSkillsAndBindingRecords(t *testing.T) {
 	assert.Equal(t, "records/controllers/cast.dbr", got.Skills[0].ControllerRecordID)
 	assert.Equal(t, uint32(14), got.Skills[1].DevotionLevel)
 	assert.Equal(t, uint32(12345), got.Skills[1].DevotionExperience)
+}
+
+func TestDecodeDistinguishesMissingBlock8FromEmptySkills(t *testing.T) {
+	t.Parallel()
+
+	missing, err := Decode([]byte(`{"Header":{"Name":"A"},"Block2":{},"Block3":{}}`))
+	require.NoError(t, err)
+	require.Len(t, missing.Diagnostics, 1)
+	assert.Equal(t, character.SeverityError, missing.Diagnostics[0].Severity)
+	assert.Equal(t, character.DiagnosticCodeGrimBlockMissing, missing.Diagnostics[0].Code)
+	assert.Equal(t, "Block8", missing.Diagnostics[0].Field)
+	assert.Equal(t, "grim skill data is unavailable because Block8 is missing.", missing.Diagnostics[0].Message)
+	assert.JSONEq(t, `null`, string(missing.Diagnostics[0].GrimValue))
+	assert.JSONEq(t, `null`, string(missing.Diagnostics[0].GDEditValue))
+
+	empty, err := Decode([]byte(`{"Header":{"Name":"A"},"Block2":{},"Block3":{},"Block8":{"Skills":[]}}`))
+	require.NoError(t, err)
+	assert.Empty(t, empty.Skills)
+	assert.Empty(t, empty.Diagnostics)
 }
