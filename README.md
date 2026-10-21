@@ -60,7 +60,10 @@ compares ranks after a match. gd-edit uses `Text_EN.arc`, and the HTML decoder
 marks that source as English; the database locale must also be known as English.
 Missing tags, unavailable localization, a different locale, duplicate names, or
 remaining ambiguity leave records separate and retain the unmatched-invested
-warning.
+warning. The locale is known only when the game-directory loader reads
+`Text_EN.arc`; opening ARZ files without their localization archive disables the
+tie-break. Mod-specific localization overrides are not inferred from
+`window.DATA`.
 
 The numeric class directory relationship of a mastery bar is first derived
 from ordinary mastery skills successfully matched to gd-edit. If that evidence
