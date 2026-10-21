@@ -28,6 +28,10 @@ type FactionCatalog struct {
 	Definitions             map[string]FactionDefinition
 	StandingThresholds      []FactionStandingThreshold
 	StandingThresholdsKnown bool
+	AlternateNeutralTier    string
+	AlternateNeutralName    string
+	AlternateNeutralTag     string
+	AlternateNeutralKnown   bool
 }
 
 func (d *Database) FactionCatalog() (FactionCatalog, error) {
@@ -95,6 +99,23 @@ func (d *Database) FactionCatalog() (FactionCatalog, error) {
 		})
 		result.StandingThresholds = thresholds
 		result.StandingThresholdsKnown = true
+	}
+	alternateTag, found, err := d.StringField(recordID, "factionAlternateNeutralTag")
+	if err != nil {
+		return FactionCatalog{}, fmt.Errorf("read alternate neutral faction tier: %w", err)
+	}
+	if found {
+		if tier := factionTierID(alternateTag); tier != "" {
+			name := tier
+			if localized, found := d.LocalizedText(alternateTag); found &&
+				localized != "" && !strings.HasPrefix(localized, "tag") {
+				name = localized
+			}
+			result.AlternateNeutralTier = tier
+			result.AlternateNeutralName = name
+			result.AlternateNeutralTag = alternateTag
+			result.AlternateNeutralKnown = true
+		}
 	}
 	return result, nil
 }

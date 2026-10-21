@@ -111,10 +111,12 @@ entry with the `-1` initialization sentinel is marked unknown. `is_unlocked`,
 `is_changed`, `positive_boost`, and `negative_boost` remain separate source
 fields and are not treated as reputation. `standing` is derived from the
 authoritative `factionValue1..8` thresholds and `factionTag1..8` tags in
-`gamefactions.dbr`, choosing the greatest threshold less than or equal to the
-raw reputation; boosts are not added to that value. Its source is recorded
-independently, with the tier tag localized through `Text_EN.arc` when available.
-A missing Block13,
+`gamefactions.dbr`: positive tiers use the greatest reached threshold, while
+negative tiers are selected at or below their threshold. Values between zero
+and the lowest negative threshold use `factionAlternateNeutralTag` (Hostile).
+`standing.threshold_rule` records which boundary rule applies. Boosts are not
+added to the raw reputation. The tier source is recorded independently, with
+tags localized through `Text_EN.arc` when available. A missing Block13,
 an undecodable block, an unknown faction slot, or unavailable ARZ thresholds
 does not become neutral or zero. Legacy slots retain gd-edit's canonical
 readable labels. User factions carry their `tagFactionUserN` display tags,

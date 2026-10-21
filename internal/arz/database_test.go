@@ -281,16 +281,17 @@ func TestFactionCatalogUsesStableARZIdentitiesAndThresholdTags(t *testing.T) {
 			"factionValue8": {25000},
 		},
 		Strings: map[string][]string{
-			"factionUser8":      {"records/controllers/factions/kymons.dbr"},
-			"factionAetherials": {"records/controllers/factions/aetherials.dbr"},
-			"factionTag1":       {"tagFactionStateEnemy5"},
-			"factionTag2":       {"tagFactionStateEnemy4"},
-			"factionTag3":       {"tagFactionStateEnemy2"},
-			"factionTag4":       {"tagFactionStateNeutral"},
-			"factionTag5":       {"tagFactionStateFriend1"},
-			"factionTag6":       {"tagFactionStateFriend2"},
-			"factionTag7":       {"tagFactionStateFriend4"},
-			"factionTag8":       {"tagFactionStateFriend5"},
+			"factionUser8":               {"records/controllers/factions/kymons.dbr"},
+			"factionAetherials":          {"records/controllers/factions/aetherials.dbr"},
+			"factionTag1":                {"tagFactionStateEnemy5"},
+			"factionTag2":                {"tagFactionStateEnemy4"},
+			"factionTag3":                {"tagFactionStateEnemy2"},
+			"factionTag4":                {"tagFactionStateNeutral"},
+			"factionTag5":                {"tagFactionStateFriend1"},
+			"factionTag6":                {"tagFactionStateFriend2"},
+			"factionTag7":                {"tagFactionStateFriend4"},
+			"factionTag8":                {"tagFactionStateFriend5"},
+			"factionAlternateNeutralTag": {"tagFactionStateEnemy1"},
 		},
 	}
 	database, err := arz.New(arzlib.Encode([]arzlib.EncRec{
@@ -309,6 +310,9 @@ func TestFactionCatalogUsesStableARZIdentitiesAndThresholdTags(t *testing.T) {
 	catalog, err := database.FactionCatalog()
 	require.NoError(t, err)
 	assert.True(t, catalog.StandingThresholdsKnown)
+	assert.True(t, catalog.AlternateNeutralKnown)
+	assert.Equal(t, "enemy1", catalog.AlternateNeutralTier)
+	assert.Equal(t, "tagFactionStateEnemy1", catalog.AlternateNeutralTag)
 	require.Len(t, catalog.StandingThresholds, 8)
 	assert.Equal(t, float32(-8000), catalog.StandingThresholds[1].Minimum)
 	assert.Equal(t, "enemy4", catalog.StandingThresholds[1].Tier)

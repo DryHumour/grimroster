@@ -322,12 +322,13 @@ type FactionIdentity struct {
 }
 
 type FactionStanding struct {
-	Tier      string            `json:"tier,omitempty"`
-	Name      string            `json:"name,omitempty"`
-	NameTag   string            `json:"name_tag,omitempty"`
-	Threshold float32           `json:"threshold"`
-	Known     bool              `json:"known"`
-	Source    FactionDataSource `json:"source"`
+	Tier          string            `json:"tier,omitempty"`
+	Name          string            `json:"name,omitempty"`
+	NameTag       string            `json:"name_tag,omitempty"`
+	Threshold     float32           `json:"threshold"`
+	ThresholdRule string            `json:"threshold_rule,omitempty"`
+	Known         bool              `json:"known"`
+	Source        FactionDataSource `json:"source"`
 }
 
 type FactionReputation struct {

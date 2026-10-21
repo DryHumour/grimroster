@@ -73,15 +73,16 @@ func TestFactionCatalogLocalizesNamesWithoutChangingFactionIDs(t *testing.T) {
 				"factionValue8": {25000},
 			},
 			Strings: map[string][]string{
-				"factionUser8": {"records/controllers/factions/kymons.dbr"},
-				"factionTag1":  {"tagFactionStateEnemy5"},
-				"factionTag2":  {"tagFactionStateEnemy4"},
-				"factionTag3":  {"tagFactionStateEnemy2"},
-				"factionTag4":  {"tagFactionStateNeutral"},
-				"factionTag5":  {"tagFactionStateFriend1"},
-				"factionTag6":  {"tagFactionStateFriend2"},
-				"factionTag7":  {"tagFactionStateFriend4"},
-				"factionTag8":  {"tagFactionStateFriend5"},
+				"factionUser8":               {"records/controllers/factions/kymons.dbr"},
+				"factionAlternateNeutralTag": {"tagFactionStateEnemy1"},
+				"factionTag1":                {"tagFactionStateEnemy5"},
+				"factionTag2":                {"tagFactionStateEnemy4"},
+				"factionTag3":                {"tagFactionStateEnemy2"},
+				"factionTag4":                {"tagFactionStateNeutral"},
+				"factionTag5":                {"tagFactionStateFriend1"},
+				"factionTag6":                {"tagFactionStateFriend2"},
+				"factionTag7":                {"tagFactionStateFriend4"},
+				"factionTag8":                {"tagFactionStateFriend5"},
 			},
 		},
 		{
@@ -94,6 +95,7 @@ func TestFactionCatalogLocalizesNamesWithoutChangingFactionIDs(t *testing.T) {
 	require.NoError(t, err)
 	database.localization["tagFactionUser8"] = "Kymon's Chosen"
 	database.localization["tagFactionStateNeutral"] = "Neutral"
+	database.localization["tagFactionStateEnemy1"] = "Hostile"
 
 	catalog, err := database.FactionCatalog()
 	require.NoError(t, err)
@@ -102,6 +104,7 @@ func TestFactionCatalogLocalizesNamesWithoutChangingFactionIDs(t *testing.T) {
 	assert.Equal(t, "Kymon's Chosen", faction.Name)
 	assert.Equal(t, "tagFactionUser8", faction.NameTag)
 	assert.Equal(t, "Neutral", catalog.StandingThresholds[3].Name)
+	assert.Equal(t, "Hostile", catalog.AlternateNeutralName)
 }
 
 func makeLocalizationARC(filename string, contents []byte) []byte {

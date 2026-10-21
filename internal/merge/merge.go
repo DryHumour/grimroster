@@ -227,7 +227,7 @@ func enrichFactionData(result *character.Character, database *arz.Database) erro
 			}
 			continue
 		}
-		standing := factionStanding(reputation.Reputation, catalog.StandingThresholds)
+		standing := factionStanding(reputation.Reputation, catalog)
 		if standing != nil {
 			reputation.Standing = *standing
 		}
@@ -259,24 +259,61 @@ func enrichFactionIdentity(identity *character.FactionIdentity, catalog arz.Fact
 	identity.Source = character.FactionIdentitySourceARZ
 }
 
-func factionStanding(value float32, thresholds []arz.FactionStandingThreshold) *character.FactionStanding {
+func factionStanding(value float32, catalog arz.FactionCatalog) *character.FactionStanding {
+	thresholds := catalog.StandingThresholds
 	if len(thresholds) == 0 {
 		return nil
 	}
-	standing := thresholds[0]
-	for _, threshold := range thresholds {
+	neutralIndex := -1
+	for index, threshold := range thresholds {
+		if threshold.Tier == "neutral" {
+			neutralIndex = index
+			break
+		}
+	}
+	if neutralIndex < 0 {
+		return nil
+	}
+	neutral := thresholds[neutralIndex]
+	if value < neutral.Minimum {
+		for _, threshold := range thresholds[:neutralIndex] {
+			if value <= threshold.Minimum {
+				return factionStandingAtThreshold(threshold, "at_or_below")
+			}
+		}
+		if !catalog.AlternateNeutralKnown {
+			return nil
+		}
+		return &character.FactionStanding{
+			Tier:          catalog.AlternateNeutralTier,
+			Name:          catalog.AlternateNeutralName,
+			NameTag:       catalog.AlternateNeutralTag,
+			Threshold:     neutral.Minimum,
+			ThresholdRule: "below_neutral",
+			Known:         true,
+			Source:        character.FactionDataSourceARZ,
+		}
+	}
+
+	standing := neutral
+	for _, threshold := range thresholds[neutralIndex+1:] {
 		if value < threshold.Minimum {
 			break
 		}
 		standing = threshold
 	}
+	return factionStandingAtThreshold(standing, "at_or_above")
+}
+
+func factionStandingAtThreshold(threshold arz.FactionStandingThreshold, thresholdRule string) *character.FactionStanding {
 	return &character.FactionStanding{
-		Tier:      standing.Tier,
-		Name:      standing.Name,
-		NameTag:   standing.Tag,
-		Threshold: standing.Minimum,
-		Known:     true,
-		Source:    character.FactionDataSourceARZ,
+		Tier:          threshold.Tier,
+		Name:          threshold.Name,
+		NameTag:       threshold.Tag,
+		Threshold:     threshold.Minimum,
+		ThresholdRule: thresholdRule,
+		Known:         true,
+		Source:        character.FactionDataSourceARZ,
 	}
 }
 
