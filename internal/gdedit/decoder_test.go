@@ -19,7 +19,10 @@ func TestDecodeHTMLExtractsAndMapsWindowData(t *testing.T) {
 				"equipment": [{"slot":"Head","name":"Test Helm","seed":42,"itemLevel":20},null,{"slot":"Hands","name":""}]
 			},
 			"tree": {"trees":[{"mastery":"Soldier","nodes":[{"record_id":"records/skills/playerclass01/cadence.dbr","name":"Cadence","level":3,"gear":1,"max":16,"ultimate":22,"desc":"Melee attack.","cur":["Current effect"],"next":["Next effect"],"tex":"ui/skills/icons/cadence.tex"}]}]},
-			"devo": {"constellations":[{"name":"Fiend","bitmap":"ui/skills/devotion/fiend.tex","starsTaken":1,"starsTotal":5,"complete":false,"stars":[{"name":"Flame Torrent","button":5,"skill":true,"taken":true,"bound":{"name":"Cadence","trigger":"selfonattack_25%"}},{"name":"Fiend","button":1,"skill":false,"taken":false,"bound":null}]}]}
+			"devo": {
+				"affinities":[{"name":"Ascendant","points":1},{"name":"Chaos","points":0},{"name":"Eldritch","points":2},{"name":"Order","points":0},{"name":"Primordial","points":0}],
+				"constellations":[{"name":"Fiend","bitmap":"ui/skills/devotion/fiend.tex","starsTaken":1,"starsTotal":5,"complete":false,"affinity":[{"name":"Eldritch","points":3}],"required":[{"name":"Chaos","points":1}],"stars":[{"name":"Flame Torrent","button":5,"skill":true,"taken":true,"bound":{"name":"Cadence","trigger":"selfonattack_25%"}},{"name":"Fiend","button":1,"skill":false,"taken":false,"bound":null}]}]
+			}
 			}
 		};
 	</script></html>`)
@@ -47,9 +50,33 @@ func TestDecodeHTMLExtractsAndMapsWindowData(t *testing.T) {
 	assert.Equal(t, "ui/skills/icons/cadence.tex", got.Skills[0].JoinKey)
 	require.Len(t, got.Devotions, 1)
 	assert.Equal(t, "Fiend", got.Devotions[0].Name)
+	assert.True(t, got.Affinities.AllKnown())
+	assert.Equal(t, uint32(1), got.Affinities.Ascendant.Points)
+	assert.Equal(t, uint32(2), got.Affinities.Eldritch.Points)
+	assert.True(t, got.Devotions[0].AffinityRequirements.AllKnown())
+	assert.Equal(t, uint32(1), got.Devotions[0].AffinityRequirements.Chaos.Points)
+	assert.True(t, got.Devotions[0].AffinityRewards.AllKnown())
+	assert.Equal(t, uint32(3), got.Devotions[0].AffinityRewards.Eldritch.Points)
 	require.Len(t, got.Devotions[0].Stars, 2)
 	assert.Equal(t, "Cadence", got.Devotions[0].Stars[0].Bound)
 	assert.Equal(t, "selfonattack_25%", got.Devotions[0].Stars[0].Trigger)
+}
+
+func TestDecodeAffinitySourceUnknownVersusKnownZero(t *testing.T) {
+	t.Parallel()
+
+	unknown, err := DecodeJSON([]byte(`{"sheet":{"character":{},"stats":{}}}`))
+	require.NoError(t, err)
+	assert.False(t, unknown.Affinities.AllKnown())
+
+	knownZero, err := DecodeJSON([]byte(`{"sheet":{"character":{},"stats":{}},"devo":{"affinities":[],"constellations":[]}}`))
+	require.NoError(t, err)
+	assert.True(t, knownZero.Affinities.AllKnown())
+	assert.Zero(t, knownZero.Affinities.Ascendant.Points)
+	assert.Zero(t, knownZero.Affinities.Chaos.Points)
+	assert.Zero(t, knownZero.Affinities.Eldritch.Points)
+	assert.Zero(t, knownZero.Affinities.Order.Points)
+	assert.Zero(t, knownZero.Affinities.Primordial.Points)
 }
 
 func TestDecodeHTMLReportsMissingOrMalformedData(t *testing.T) {

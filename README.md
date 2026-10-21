@@ -58,6 +58,38 @@ whether only a tag was found, no tag was available, or no database was
 available. The project does not currently load Grim Dawn localization files,
 so a display tag is not represented as a localized `name`.
 
+Devotion affinity values use the same five-key object everywhere:
+`ascendant`, `chaos`, `eldritch`, `order`, and `primordial`. Each key contains
+`points` and a `known` flag; a known zero differs from unavailable data with
+`known` set to false. `affinity_requirements` and `affinity_rewards` on each
+devotion are separate from the character's `current_affinities`. Rewards
+describe the potential return for completing that constellation and are not
+added to the current total for a partial constellation.
+
+gd-edit's embedded `devo.affinities` is authoritative for current totals and
+already includes taken Crossroads stars. Its per-constellation `required` and
+`affinity` fields are authoritative for requirements and completion rewards.
+When either per-constellation field is unavailable, matching ARZ constellation
+records provide a fallback through their bitmap and `affinityRequired*` /
+`affinityGiven*` fields. Each result includes a source field
+(`gd_edit`, `arz`, `mixed`, or `unknown`). Missing totals remain unknown rather
+than being inferred as zero.
+
+ARZ records with one devotion-button link carry an independent per-star award.
+Those awards are associated with save skill record IDs, not localized
+constellation names. This accounts for gd-edit's grouped Crossroads display:
+the current total includes each taken Crossroads star even when the displayed
+five-star group is incomplete. Ordinary multi-button constellations only grant
+their potential reward when complete.
+
+When the direct total and all required reward/taken-state data are known, the
+merger reconciles it against completed rewards and individually earned star
+awards. A `devotion.affinity_total_mismatch` diagnostic reports disagreement;
+its `grim_value` records the reward calculation and `gd_edit_value` records the
+direct `devo.affinities` total. Reconciliation is suppressed if per-star
+contributions cannot be established (for example, missing ARZ data or a missing
+save skill block), rather than treating those contributions as zero.
+
 On Windows, `internal/arz` can discover a Steam installation from the registry
 and load its base and installed expansion databases. Other platforms can open
 ARZ files or a game directory explicitly.

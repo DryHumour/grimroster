@@ -148,6 +148,36 @@ func (d *Database) StringField(recordID, fieldName string) (string, bool, error)
 	return "", false, nil
 }
 
+func (d *Database) Int32Field(recordID, fieldName string) (int32, bool, error) {
+	ref, ok := d.records[recordID]
+	if !ok {
+		return 0, false, nil
+	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	fields, err := ref.db.Fields(ref.record)
+	if err != nil {
+		return 0, false, fmt.Errorf("read fields from ARZ record %q: %w", recordID, err)
+	}
+
+	for field := range fields.Seq {
+		if string(ref.db.String(field.Name())) != fieldName {
+			continue
+		}
+		if field.Type() != arzlib.FieldTypeInt32 {
+			return 0, false, fmt.Errorf("ARZ field %q in record %q is not an int32", fieldName, recordID)
+		}
+		if field.ValuesAmount() != 1 {
+			return 0, false, fmt.Errorf("ARZ field %q in record %q has %d values; expected one", fieldName, recordID, field.ValuesAmount())
+		}
+		return int32(field.Value()), true, nil
+	}
+
+	return 0, false, nil
+}
+
 func (d *Database) StringValuesField(recordID, fieldName string) ([]string, bool, error) {
 	ref, ok := d.records[recordID]
 	if !ok {
