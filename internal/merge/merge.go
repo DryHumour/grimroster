@@ -72,6 +72,11 @@ func MergeWithDatabase(grim character.Character, sheet gdedit.Data, database *ar
 	for i := range result.Devotions {
 		result.Devotions[i].Stars = slices.Clone(grim.Devotions[i].Stars)
 	}
+	result.FactionReputations = slices.Clone(grim.FactionReputations)
+	if grim.MyFaction != nil {
+		myFaction := *grim.MyFaction
+		result.MyFaction = &myFaction
+	}
 	result.Diagnostics = slices.Clone(grim.Diagnostics)
 	result.Inventory.Equipment = slices.Clone(grim.Inventory.Equipment)
 	result.Inventory.Bags = slices.Clone(grim.Inventory.Bags)
@@ -190,6 +195,9 @@ func MergeWithDatabase(grim character.Character, sheet gdedit.Data, database *ar
 	}
 
 	if database != nil {
+		if err := enrichFactionData(&result, database); err != nil {
+			return character.Character{}, err
+		}
 		enriched, err := database.Enrich(result)
 		if err != nil {
 			return character.Character{}, fmt.Errorf("enrich character items from ARZ database: %w", err)
@@ -198,6 +206,115 @@ func MergeWithDatabase(grim character.Character, sheet gdedit.Data, database *ar
 	}
 
 	return result, nil
+}
+
+func enrichFactionData(result *character.Character, database *arz.Database) error {
+	catalog, err := database.FactionCatalog()
+	if err != nil {
+		return fmt.Errorf("load faction identities and standing thresholds from ARZ: %w", err)
+	}
+	if result.MyFaction != nil {
+		enrichFactionIdentity(result.MyFaction, catalog, database)
+	}
+	for i := range result.FactionReputations {
+		reputation := &result.FactionReputations[i]
+		enrichFactionIdentity(&reputation.Faction, catalog, database)
+		if !reputation.Faction.DefinitionKnown ||
+			!reputation.ReputationKnown ||
+			!catalog.StandingThresholdsKnown {
+			reputation.Standing = character.FactionStanding{
+				Source: character.FactionDataSourceUnknown,
+			}
+			continue
+		}
+		standing := factionStanding(reputation.Reputation, catalog)
+		if standing != nil {
+			reputation.Standing = *standing
+		}
+	}
+	return nil
+}
+
+func enrichFactionIdentity(identity *character.FactionIdentity, catalog arz.FactionCatalog, database *arz.Database) {
+	if identity.ID == "" {
+		return
+	}
+	if identity.Name == identity.ID && identity.NameTag != "" {
+		if localized, found := database.LocalizedText(identity.NameTag); found &&
+			localized != "" && !strings.HasPrefix(localized, "User") {
+			identity.Name = localized
+		}
+	}
+	definition, found := catalog.Definitions[identity.ID]
+	if !found {
+		return
+	}
+	if identity.Name == "" || identity.Name == identity.ID {
+		identity.Name = definition.Name
+	}
+	identity.NameTag = definition.NameTag
+	identity.RecordID = definition.RecordID
+	identity.Known = true
+	identity.DefinitionKnown = true
+	identity.Source = character.FactionIdentitySourceARZ
+}
+
+func factionStanding(value float32, catalog arz.FactionCatalog) *character.FactionStanding {
+	thresholds := catalog.StandingThresholds
+	if len(thresholds) == 0 {
+		return nil
+	}
+	neutralIndex := -1
+	for index, threshold := range thresholds {
+		if threshold.Tier == "neutral" {
+			neutralIndex = index
+			break
+		}
+	}
+	if neutralIndex < 0 {
+		return nil
+	}
+	neutral := thresholds[neutralIndex]
+	if value < neutral.Minimum {
+		for _, threshold := range thresholds[:neutralIndex] {
+			if value <= threshold.Minimum {
+				return factionStandingAtThreshold(threshold, "at_or_below")
+			}
+		}
+		if !catalog.AlternateNeutralKnown {
+			return nil
+		}
+		return &character.FactionStanding{
+			Tier:          catalog.AlternateNeutralTier,
+			Name:          catalog.AlternateNeutralName,
+			NameTag:       catalog.AlternateNeutralTag,
+			Threshold:     neutral.Minimum,
+			ThresholdRule: "below_neutral",
+			Known:         true,
+			Source:        character.FactionDataSourceARZ,
+		}
+	}
+
+	standing := neutral
+	for _, threshold := range thresholds[neutralIndex+1:] {
+		if value < threshold.Minimum {
+			break
+		}
+		standing = threshold
+	}
+	return factionStandingAtThreshold(standing, "at_or_above")
+}
+
+func factionStandingAtThreshold(threshold arz.FactionStandingThreshold, thresholdRule string) *character.FactionStanding {
+	return &character.FactionStanding{
+		Tier:          threshold.Tier,
+		Name:          threshold.Name,
+		NameTag:       threshold.Tag,
+		Threshold:     threshold.Minimum,
+		ThresholdRule: thresholdRule,
+		Known:         true,
+		Source:        character.FactionDataSourceARZ,
+	}
 }
 
 func mergeSkills(result *character.Character, observations []gdedit.SkillObservation, database *arz.Database) error {

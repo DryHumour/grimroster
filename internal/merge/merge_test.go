@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	arzlib "codeberg.org/alex-ilchukov/arz/v2"
@@ -516,6 +517,195 @@ func TestMergeUsesGDeditAffinityDataBeforeARZFallback(t *testing.T) {
 	assert.Equal(t, uint32(7), got.Devotions[0].AffinityRequirements.Chaos.Points)
 	assert.Equal(t, character.AffinitySourceGDEdit, got.Devotions[0].AffinityRewardsSource)
 	assert.Equal(t, uint32(3), got.Devotions[0].AffinityRewards.Chaos.Points)
+}
+
+func TestMergeResolvesFactionIDsAndStandingThresholds(t *testing.T) {
+	t.Parallel()
+
+	database, err := newFactionDatabase(t)
+	require.NoError(t, err)
+
+	ids := []string{
+		"User0", "User1", "User2", "User3", "User4",
+		"User5", "User6", "User7", "User8", "User9",
+	}
+	values := []float32{-20000, -8000, -1500, 0, 1500, 5000, 10000, 25000, -1500, 0}
+	tiers := []string{"enemy5", "enemy4", "enemy2", "neutral", "friend1", "friend2", "friend4", "friend5", "enemy2", "neutral"}
+	factions := make([]character.FactionReputation, 0, len(ids))
+	for index, id := range ids {
+		factions = append(factions, character.FactionReputation{
+			Faction: character.FactionIdentity{
+				ID:          id,
+				Name:        id,
+				NameTag:     factionNameTagForTest(id),
+				SourceIndex: uint32(index + 6),
+				Known:       true,
+				Source:      character.FactionIdentitySourceGrimSchema,
+			},
+			Reputation:         values[index],
+			ReputationKnown:    true,
+			IsUnlocked:         index != 9,
+			IsUnlockedKnown:    true,
+			IsChangedKnown:     true,
+			PositiveBoostKnown: true,
+			NegativeBoostKnown: true,
+			Standing: character.FactionStanding{
+				Source: character.FactionDataSourceUnknown,
+			},
+		})
+	}
+	playerFaction := character.FactionIdentity{
+		ID:          "Player",
+		Name:        "Player",
+		SourceIndex: 0,
+		Known:       true,
+		Source:      character.FactionIdentitySourceGrimSchema,
+	}
+	grim := character.Character{
+		FactionReputations: factions,
+		FactionDataSource:  character.FactionDataSourceGrim,
+		MyFaction:          &playerFaction,
+	}
+
+	got, err := MergeWithDatabase(grim, gdedit.Data{}, database)
+	require.NoError(t, err)
+	assert.Equal(t, character.FactionDataSourceGrim, got.FactionDataSource)
+	require.NotNil(t, got.MyFaction)
+	assert.Equal(t, "Player", got.MyFaction.ID)
+	assert.Equal(t, "records/controllers/factions/player.dbr", got.MyFaction.RecordID)
+	assert.NotEqual(t, "User5", got.MyFaction.ID)
+	assert.NotEqual(t, "User8", got.MyFaction.ID)
+	require.Len(t, got.FactionReputations, len(ids))
+	for index, faction := range got.FactionReputations {
+		assert.Equal(t, ids[index], faction.Faction.ID)
+		assert.Equal(t, fmt.Sprintf("records/controllers/factions/user%d.dbr", index), faction.Faction.RecordID)
+		assert.Equal(t, values[index], faction.Reputation)
+		assert.True(t, faction.ReputationKnown)
+		assert.True(t, faction.Faction.DefinitionKnown)
+		assert.True(t, faction.Standing.Known)
+		assert.Equal(t, tiers[index], faction.Standing.Tier)
+		assert.Equal(t, character.FactionDataSourceARZ, faction.Standing.Source)
+	}
+	assert.True(t, got.FactionReputations[3].ReputationKnown)
+	assert.Zero(t, got.FactionReputations[3].Reputation)
+	assert.Equal(t, "neutral", got.FactionReputations[3].Standing.Tier)
+	assert.Equal(t, "tagFactionUser5", got.FactionReputations[5].Faction.NameTag)
+	assert.Equal(t, float32(5000), got.FactionReputations[5].Reputation)
+	assert.Equal(t, float32(-1500), got.FactionReputations[8].Reputation)
+	assert.False(t, got.FactionReputations[9].IsUnlocked)
+	assert.Empty(t, got.Diagnostics)
+
+	withoutDatabase, err := Merge(grim, gdedit.Data{})
+	require.NoError(t, err)
+	assert.Equal(t, "User5", withoutDatabase.FactionReputations[5].Faction.Name)
+	assert.False(t, withoutDatabase.FactionReputations[5].Faction.DefinitionKnown)
+	assert.False(t, withoutDatabase.FactionReputations[5].Standing.Known)
+	assert.Equal(t, "User5", grim.FactionReputations[5].Faction.Name)
+}
+
+func TestFactionStandingUsesCorrectIntervalsAtAndAroundThresholds(t *testing.T) {
+	t.Parallel()
+
+	database, err := newFactionDatabase(t)
+	require.NoError(t, err)
+	catalog, err := database.FactionCatalog()
+	require.NoError(t, err)
+
+	tests := []struct {
+		name  string
+		value float32
+		tier  string
+		rule  string
+	}{
+		{name: "below nemesis", value: -20000.5, tier: "enemy5", rule: "at_or_below"},
+		{name: "above nemesis", value: -19999.5, tier: "enemy4", rule: "at_or_below"},
+		{name: "below hated", value: -8000.5, tier: "enemy4", rule: "at_or_below"},
+		{name: "hated interval", value: -9000, tier: "enemy4", rule: "at_or_below"},
+		{name: "above hated", value: -7999.5, tier: "enemy2", rule: "at_or_below"},
+		{name: "below despised", value: -1500.5, tier: "enemy2", rule: "at_or_below"},
+		{name: "despised interval", value: -2000, tier: "enemy2", rule: "at_or_below"},
+		{name: "above despised", value: -1499.5, tier: "enemy1", rule: "below_neutral"},
+		{name: "hostile interval", value: -100, tier: "enemy1", rule: "below_neutral"},
+		{name: "negative fractional", value: -0.5, tier: "enemy1", rule: "below_neutral"},
+		{name: "zero", value: 0, tier: "neutral", rule: "at_or_above"},
+		{name: "positive below friendly", value: 1499.5, tier: "neutral", rule: "at_or_above"},
+		{name: "friendly boundary", value: 1500, tier: "friend1", rule: "at_or_above"},
+		{name: "friendly upper interval", value: 4999.5, tier: "friend1", rule: "at_or_above"},
+		{name: "respected boundary", value: 5000, tier: "friend2", rule: "at_or_above"},
+		{name: "honored boundary", value: 10000, tier: "friend4", rule: "at_or_above"},
+		{name: "revered boundary", value: 25000, tier: "friend5", rule: "at_or_above"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			standing := factionStanding(test.value, catalog)
+			require.NotNil(t, standing)
+			assert.Equal(t, test.tier, standing.Tier)
+			assert.Equal(t, test.rule, standing.ThresholdRule)
+		})
+	}
+}
+
+func newFactionDatabase(t *testing.T) (*arz.Database, error) {
+	t.Helper()
+
+	records := []arzlib.EncRec{
+		{
+			Name: "records/game/gamefactions.dbr",
+			Ints: map[string][]int32{
+				"factionValue1": {-20000},
+				"factionValue2": {-8000},
+				"factionValue3": {-1500},
+				"factionValue4": {0},
+				"factionValue5": {1500},
+				"factionValue6": {5000},
+				"factionValue7": {10000},
+				"factionValue8": {25000},
+			},
+			Strings: map[string][]string{
+				"factionPlayer":              {"records/controllers/factions/player.dbr"},
+				"factionUser0":               {"records/controllers/factions/user0.dbr"},
+				"factionUser1":               {"records/controllers/factions/user1.dbr"},
+				"factionUser2":               {"records/controllers/factions/user2.dbr"},
+				"factionUser3":               {"records/controllers/factions/user3.dbr"},
+				"factionUser4":               {"records/controllers/factions/user4.dbr"},
+				"factionUser5":               {"records/controllers/factions/user5.dbr"},
+				"factionUser6":               {"records/controllers/factions/user6.dbr"},
+				"factionUser7":               {"records/controllers/factions/user7.dbr"},
+				"factionUser8":               {"records/controllers/factions/user8.dbr"},
+				"factionUser9":               {"records/controllers/factions/user9.dbr"},
+				"factionTag1":                {"tagFactionStateEnemy5"},
+				"factionTag2":                {"tagFactionStateEnemy4"},
+				"factionTag3":                {"tagFactionStateEnemy2"},
+				"factionTag4":                {"tagFactionStateNeutral"},
+				"factionTag5":                {"tagFactionStateFriend1"},
+				"factionTag6":                {"tagFactionStateFriend2"},
+				"factionTag7":                {"tagFactionStateFriend4"},
+				"factionTag8":                {"tagFactionStateFriend5"},
+				"factionAlternateNeutralTag": {"tagFactionStateEnemy1"},
+			},
+		},
+	}
+	ids := []string{"Player", "User0", "User1", "User2", "User3", "User4", "User5", "User6", "User7", "User8", "User9"}
+	for index, id := range ids {
+		recordID := fmt.Sprintf("records/controllers/factions/user%d.dbr", index-1)
+		if id == "Player" {
+			recordID = "records/controllers/factions/player.dbr"
+		}
+		records = append(records, arzlib.EncRec{
+			Name: recordID,
+			Strings: map[string][]string{
+				"myFaction": {id},
+			},
+		})
+	}
+	return arz.New(arzlib.Encode(records))
+}
+
+func factionNameTagForTest(id string) string {
+	if strings.HasPrefix(id, "User") {
+		return "tagFaction" + id
+	}
+	return ""
 }
 
 func TestMergeReconcilesGroupedPerStarAffinityRewards(t *testing.T) {
