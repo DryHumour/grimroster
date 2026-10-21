@@ -30,6 +30,7 @@ func TestDecodeHTMLExtractsAndMapsWindowData(t *testing.T) {
 	got, err := DecodeHTML(html)
 	require.NoError(t, err)
 	assert.Equal(t, "Sheet Name", got.Name)
+	assert.Equal(t, LocalizationLanguageEnglish, got.LocalizationLanguage)
 	assert.Equal(t, uint32(30), got.Level)
 	assert.Equal(t, []string{"Soldier", "Arcanist"}, got.Masteries)
 	assert.Equal(t, "Elite", got.Difficulty)

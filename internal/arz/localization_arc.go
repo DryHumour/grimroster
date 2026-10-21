@@ -12,6 +12,8 @@ import (
 	"codeberg.org/alex-ilchukov/lz4"
 )
 
+const localizationLanguageEnglish = "en"
+
 func decodeLocalizationARC(data []byte) (map[string]string, error) {
 	reader := bytes.NewReader(data)
 	archive, err := decode.Archive(reader)
@@ -73,4 +75,8 @@ func parseLocalizationText(data []byte) map[string]string {
 func (d *Database) LocalizedText(tag string) (string, bool) {
 	value, found := d.localization[tag]
 	return value, found
+}
+
+func (d *Database) LocalizationLanguage() (string, bool) {
+	return d.localizationLanguage, d.localizationLanguage != ""
 }

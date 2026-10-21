@@ -21,9 +21,10 @@ type record struct {
 }
 
 type Database struct {
-	records      map[string]record
-	localization map[string]string
-	mu           sync.Mutex
+	records              map[string]record
+	localization         map[string]string
+	localizationLanguage string
+	mu                   sync.Mutex
 }
 
 func New(data []byte) (*Database, error) {
@@ -124,6 +125,7 @@ func OpenGameDir(gameDir string) (*Database, error) {
 			continue
 		}
 		maps.Copy(database.localization, localization)
+		database.localizationLanguage = localizationLanguageEnglish
 	}
 	return database, nil
 }
@@ -309,6 +311,18 @@ func (d *Database) SkillDisplayTag(recordID string) (string, bool, error) {
 		return "", false, fmt.Errorf("read skill display tag from %q: %w", recordID, err)
 	}
 	return tag, found && tag != "", nil
+}
+
+func (d *Database) LocalizedSkillDisplayName(recordID string) (string, bool, error) {
+	tag, found, err := d.SkillDisplayTag(recordID)
+	if err != nil {
+		return "", false, fmt.Errorf("resolve localized skill name for %q: %w", recordID, err)
+	}
+	if !found {
+		return "", false, nil
+	}
+	name, found := d.LocalizedText(tag)
+	return name, found && name != "", nil
 }
 
 func (d *Database) Enrich(input character.Character) (character.Character, error) {

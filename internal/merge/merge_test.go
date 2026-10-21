@@ -1,6 +1,7 @@
 package merge
 
 import (
+	"encoding/binary"
 	"encoding/json/jsontext"
 	"fmt"
 	"os"
@@ -708,6 +709,76 @@ func factionNameTagForTest(id string) string {
 	return ""
 }
 
+func openSkillLocalizationDatabase(t *testing.T, records []arzlib.EncRec, localization string) *arz.Database {
+	t.Helper()
+
+	gameDir := t.TempDir()
+	databasePath := filepath.Join(gameDir, "database", "database.arz")
+	localizationPath := filepath.Join(gameDir, "resources", "Text_EN.arc")
+	require.NoError(t, os.MkdirAll(filepath.Dir(databasePath), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Dir(localizationPath), 0o755))
+	require.NoError(t, os.WriteFile(databasePath, arzlib.Encode(records), 0o600))
+	require.NoError(t, os.WriteFile(localizationPath, makeTextENArchive("text_en.txt", []byte(localization)), 0o600))
+
+	database, err := arz.OpenGameDir(gameDir)
+	require.NoError(t, err)
+	language, known := database.LocalizationLanguage()
+	assert.True(t, known)
+	assert.Equal(t, gdedit.LocalizationLanguageEnglish, language)
+	return database
+}
+
+func localizedSkillRecord(recordID, texture, displayTag string) arzlib.EncRec {
+	return arzlib.EncRec{
+		Name: recordID,
+		Strings: map[string][]string{
+			"skillDisplayName":  {displayTag},
+			"skillUpBitmapName": {texture},
+		},
+	}
+}
+
+func masterySaveSkill(recordID string, level uint32) character.Skill {
+	return character.Skill{
+		RecordID:      recordID,
+		Category:      character.SkillCategoryMastery,
+		Level:         level,
+		LevelObserved: true,
+		SaveBacked:    true,
+	}
+}
+
+func makeTextENArchive(filename string, contents []byte) []byte {
+	const (
+		arcHeaderSize   = 28
+		chunkHeaderSize = 12
+		fileHeaderSize  = 44
+	)
+	filenameBytes := []byte(filename)
+	tablesOffset := arcHeaderSize + len(contents)
+	filenameOffset := tablesOffset + chunkHeaderSize
+	fileHeaderOffset := filenameOffset + len(filenameBytes)
+	result := make([]byte, fileHeaderOffset+fileHeaderSize)
+
+	copy(result[:4], []byte{'A', 'R', 'C', 0})
+	binary.LittleEndian.PutUint32(result[4:8], 3)
+	binary.LittleEndian.PutUint32(result[8:12], 1)
+	binary.LittleEndian.PutUint32(result[12:16], 1)
+	binary.LittleEndian.PutUint32(result[16:20], chunkHeaderSize)
+	binary.LittleEndian.PutUint32(result[20:24], uint32(len(filenameBytes)))
+	binary.LittleEndian.PutUint32(result[24:28], uint32(tablesOffset))
+	copy(result[arcHeaderSize:tablesOffset], contents)
+	binary.LittleEndian.PutUint32(result[tablesOffset:tablesOffset+4], uint32(arcHeaderSize))
+	binary.LittleEndian.PutUint32(result[tablesOffset+4:tablesOffset+8], uint32(len(contents)))
+	binary.LittleEndian.PutUint32(result[tablesOffset+8:tablesOffset+12], uint32(len(contents)))
+	copy(result[filenameOffset:fileHeaderOffset], filenameBytes)
+	binary.LittleEndian.PutUint32(result[fileHeaderOffset+28:fileHeaderOffset+32], 1)
+	binary.LittleEndian.PutUint32(result[fileHeaderOffset+32:fileHeaderOffset+36], 0)
+	binary.LittleEndian.PutUint32(result[fileHeaderOffset+36:fileHeaderOffset+40], uint32(len(filenameBytes)))
+	binary.LittleEndian.PutUint32(result[fileHeaderOffset+40:fileHeaderOffset+44], 0)
+	return result
+}
+
 func TestMergeReconcilesGroupedPerStarAffinityRewards(t *testing.T) {
 	t.Parallel()
 
@@ -1173,6 +1244,157 @@ func TestMergeLeavesAmbiguousInvestedSkillUncorrelated(t *testing.T) {
 	assert.True(t, got.Skills[2].GDEditOnly)
 	assert.Empty(t, got.Skills[2].RecordID)
 	assert.Equal(t, character.SkillMatchStatusAmbiguous, got.Skills[2].MatchStatus)
+	require.Len(t, got.Diagnostics, 1)
+	assert.Equal(t, character.DiagnosticCodeSkillUnmatchedInvested, got.Diagnostics[0].Code)
+}
+
+func TestMergeUsesLocalizedNameToResolveAntigoneDiscordTextureAmbiguity(t *testing.T) {
+	t.Parallel()
+
+	const sharedTexture = "ui/skills/icons/shared-transmuter.tex"
+	database := openSkillLocalizationDatabase(t, []arzlib.EncRec{
+		localizedSkillRecord("records/skills/playerclass01/cadence1b.dbr", sharedTexture, "tagDiscord"),
+		localizedSkillRecord("records/skills/playerclass01/other-transmuter.dbr", sharedTexture, "tagTremor"),
+		localizedSkillRecord("records/skills/playerclass07/discord.dbr", sharedTexture, "tagDiscord"),
+		localizedSkillRecord("records/skills/playerclass01/soldier-anchor.dbr", "ui/skills/icons/soldier-anchor.tex", "tagSoldierAnchor"),
+		localizedSkillRecord("records/skills/playerclass07/inquisitor-anchor.dbr", "ui/skills/icons/inquisitor-anchor.tex", "tagInquisitorAnchor"),
+	}, "tagDiscord=Discord\ntagTremor=Tremor\ntagSoldierAnchor=Soldier Anchor\ntagInquisitorAnchor=Inquisitor Anchor\n")
+
+	grim := character.Character{Skills: []character.Skill{
+		masterySaveSkill("records/skills/playerclass01/cadence1b.dbr", 3),
+		masterySaveSkill("records/skills/playerclass01/other-transmuter.dbr", 1),
+		masterySaveSkill("records/skills/playerclass07/discord.dbr", 2),
+		masterySaveSkill("records/skills/playerclass01/soldier-anchor.dbr", 1),
+		masterySaveSkill("records/skills/playerclass07/inquisitor-anchor.dbr", 1),
+	}}
+	sheet := gdedit.Data{
+		LocalizationLanguage: gdedit.LocalizationLanguageEnglish,
+		Skills: []gdedit.SkillObservation{
+			{Mastery: "Soldier", Name: "Soldier Anchor", Level: 1, JoinKey: "ui/skills/icons/soldier-anchor.tex"},
+			{Mastery: "Inquisitor", Name: "Inquisitor Anchor", Level: 1, JoinKey: "ui/skills/icons/inquisitor-anchor.tex"},
+			{Mastery: "Soldier", Name: "Discord", Level: 3, JoinKey: sharedTexture},
+			{Mastery: "Inquisitor", Name: "Discord", Level: 2, JoinKey: sharedTexture},
+		},
+	}
+
+	got, err := MergeWithDatabase(grim, sheet, database)
+	require.NoError(t, err)
+	require.Len(t, got.Skills, len(grim.Skills))
+	assert.Equal(t, character.SkillMatchStatusMatchedTexture, got.Skills[3].MatchStatus)
+	assert.Equal(t, character.SkillMatchStatusMatchedTexture, got.Skills[4].MatchStatus)
+	assert.Equal(t, "Discord", got.Skills[0].Name)
+	assert.Equal(t, "Soldier", got.Skills[0].Mastery)
+	assert.Equal(t, character.SkillMatchStatusMatchedLocalizedName, got.Skills[0].MatchStatus)
+	assert.Equal(t, uint32(3), got.Skills[0].Level)
+	assert.Equal(t, uint32(3), got.Skills[0].GDEditLevel)
+	assert.Equal(t, "Discord", got.Skills[2].Name)
+	assert.Equal(t, "Inquisitor", got.Skills[2].Mastery)
+	assert.Equal(t, character.SkillMatchStatusMatchedLocalizedName, got.Skills[2].MatchStatus)
+	assert.Empty(t, got.Diagnostics)
+}
+
+func TestMergeLocalizedSkillMatchStillDiagnosesRankMismatch(t *testing.T) {
+	t.Parallel()
+
+	const texture = "ui/skills/icons/shared-transmuter.tex"
+	database := openSkillLocalizationDatabase(t, []arzlib.EncRec{
+		localizedSkillRecord("records/skills/playerclass01/cadence1b.dbr", texture, "tagDiscord"),
+		localizedSkillRecord("records/skills/playerclass01/other-transmuter.dbr", texture, "tagOther"),
+	}, "tagDiscord=Discord\ntagOther=Other Skill\n")
+
+	got, err := MergeWithDatabase(character.Character{Skills: []character.Skill{
+		masterySaveSkill("records/skills/playerclass01/cadence1b.dbr", 2),
+		masterySaveSkill("records/skills/playerclass01/other-transmuter.dbr", 1),
+	}}, gdedit.Data{
+		LocalizationLanguage: gdedit.LocalizationLanguageEnglish,
+		Skills: []gdedit.SkillObservation{{
+			Mastery: "Soldier",
+			Name:    "Discord",
+			Level:   3,
+			JoinKey: texture,
+		}},
+	}, database)
+	require.NoError(t, err)
+	require.Len(t, got.Skills, 2)
+	assert.Equal(t, character.SkillMatchStatusMatchedLocalizedName, got.Skills[0].MatchStatus)
+	assert.Equal(t, uint32(2), got.Skills[0].Level)
+	assert.Equal(t, uint32(3), got.Skills[0].GDEditLevel)
+	require.Len(t, got.Diagnostics, 1)
+	assert.Equal(t, character.DiagnosticCodeSkillLevelMismatch, got.Diagnostics[0].Code)
+}
+
+func TestMergeLeavesLocalizedTextureAmbiguityUnmatchedConservatively(t *testing.T) {
+	t.Parallel()
+
+	const texture = "ui/skills/icons/shared-transmuter.tex"
+	tests := []struct {
+		name         string
+		localization string
+		htmlLanguage string
+	}{
+		{name: "duplicate localized names", localization: "tagDiscord1=Discord\ntagDiscord2=Discord\n", htmlLanguage: gdedit.LocalizationLanguageEnglish},
+		{name: "missing localization", localization: "tagOther=Other Skill\n", htmlLanguage: gdedit.LocalizationLanguageEnglish},
+		{name: "language mismatch", localization: "tagDiscord1=Discord\ntagDiscord2=Other Skill\n", htmlLanguage: "de"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			database := openSkillLocalizationDatabase(t, []arzlib.EncRec{
+				localizedSkillRecord("records/skills/playerclass01/first.dbr", texture, "tagDiscord1"),
+				localizedSkillRecord("records/skills/playerclass01/second.dbr", texture, "tagDiscord2"),
+			}, test.localization)
+			got, err := MergeWithDatabase(character.Character{Skills: []character.Skill{
+				masterySaveSkill("records/skills/playerclass01/first.dbr", 1),
+				masterySaveSkill("records/skills/playerclass01/second.dbr", 1),
+			}}, gdedit.Data{
+				LocalizationLanguage: test.htmlLanguage,
+				Skills: []gdedit.SkillObservation{{
+					Mastery: "Soldier",
+					Name:    "Discord",
+					Level:   1,
+					JoinKey: texture,
+				}},
+			}, database)
+			require.NoError(t, err)
+			require.Len(t, got.Skills, 3)
+			assert.Equal(t, character.SkillMatchStatusAmbiguous, got.Skills[0].MatchStatus)
+			assert.Equal(t, character.SkillMatchStatusAmbiguous, got.Skills[1].MatchStatus)
+			assert.True(t, got.Skills[2].GDEditOnly)
+			assert.Equal(t, character.SkillMatchStatusAmbiguous, got.Skills[2].MatchStatus)
+			require.Len(t, got.Diagnostics, 1)
+			assert.Equal(t, character.DiagnosticCodeSkillUnmatchedInvested, got.Diagnostics[0].Code)
+		})
+	}
+}
+
+func TestMergeLocalizedNameCannotOverrideConflictingRecordIDs(t *testing.T) {
+	t.Parallel()
+
+	const texture = "ui/skills/icons/shared-transmuter.tex"
+	database := openSkillLocalizationDatabase(t, []arzlib.EncRec{
+		localizedSkillRecord("records/skills/playerclass01/cadence1b.dbr", texture, "tagDiscord"),
+		localizedSkillRecord("records/skills/playerclass01/html-skill.dbr", texture, "tagDiscord"),
+	}, "tagDiscord=Discord\n")
+
+	got, err := MergeWithDatabase(character.Character{Skills: []character.Skill{
+		masterySaveSkill("records/skills/playerclass01/cadence1b.dbr", 3),
+	}}, gdedit.Data{
+		LocalizationLanguage: gdedit.LocalizationLanguageEnglish,
+		Skills: []gdedit.SkillObservation{{
+			RecordID: "records/skills/playerclass01/html-skill.dbr",
+			Mastery:  "Soldier",
+			Name:     "Discord",
+			Level:    3,
+			JoinKey:  texture,
+		}},
+	}, database)
+	require.NoError(t, err)
+	require.Len(t, got.Skills, 2)
+	assert.Equal(t, character.SkillMatchStatusRecordIDConflict, got.Skills[0].MatchStatus)
+	assert.Equal(t, character.SkillMatchStatusRecordIDConflict, got.Skills[1].MatchStatus)
+	assert.False(t, got.Skills[0].GDEditOnly)
+	assert.True(t, got.Skills[1].GDEditOnly)
 	require.Len(t, got.Diagnostics, 1)
 	assert.Equal(t, character.DiagnosticCodeSkillUnmatchedInvested, got.Diagnostics[0].Code)
 }

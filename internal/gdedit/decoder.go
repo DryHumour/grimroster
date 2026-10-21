@@ -13,17 +13,21 @@ import (
 	"github.com/DryHumour/grimroster/internal/character"
 )
 
+// gd-edit resolves exported display strings from its Text_EN.arc resource.
+const LocalizationLanguageEnglish = "en"
+
 type Data struct {
-	Name       string
-	Level      uint32
-	Masteries  []string
-	Difficulty string
-	Expansion  string
-	Calculated character.Calculated
-	Equipment  []Equipment
-	Skills     []SkillObservation
-	Devotions  []Devotion
-	Affinities character.AffinityAmounts
+	Name                 string
+	Level                uint32
+	Masteries            []string
+	Difficulty           string
+	Expansion            string
+	LocalizationLanguage string
+	Calculated           character.Calculated
+	Equipment            []Equipment
+	Skills               []SkillObservation
+	Devotions            []Devotion
+	Affinities           character.AffinityAmounts
 }
 
 type Equipment struct {
@@ -183,11 +187,12 @@ func DecodeJSON(data []byte) (Data, error) {
 	}
 
 	result := Data{
-		Name:       stripANSI(input.Sheet.Character.Name),
-		Level:      input.Sheet.Character.Level,
-		Masteries:  stripANSIStrings(input.Sheet.Character.Masteries),
-		Difficulty: stripANSI(input.Sheet.Character.Difficulty),
-		Expansion:  stripANSI(input.Sheet.Character.Expansion),
+		Name:                 stripANSI(input.Sheet.Character.Name),
+		Level:                input.Sheet.Character.Level,
+		Masteries:            stripANSIStrings(input.Sheet.Character.Masteries),
+		Difficulty:           stripANSI(input.Sheet.Character.Difficulty),
+		Expansion:            stripANSI(input.Sheet.Character.Expansion),
+		LocalizationLanguage: LocalizationLanguageEnglish,
 		Calculated: character.Calculated{
 			Physique:         input.Sheet.Stats.Physique,
 			Cunning:          input.Sheet.Stats.Cunning,
