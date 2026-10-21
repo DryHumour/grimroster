@@ -1,6 +1,9 @@
 package character
 
-import "encoding/json/jsontext"
+import (
+	"encoding/json/jsontext"
+	"strings"
+)
 
 type Gender string
 
@@ -106,28 +109,85 @@ type Inventory struct {
 }
 
 type Skill struct {
-	RecordID           string   `json:"record_id,omitempty"`
-	Name               string   `json:"name,omitempty"`
-	Mastery            string   `json:"mastery,omitempty"`
-	Level              uint32   `json:"level"`
-	IsDevotion         bool     `json:"is_devotion"`
-	DevotionLevel      uint32   `json:"devotion_level"`
-	DevotionExperience uint32   `json:"devotion_experience"`
-	Sublevel           uint32   `json:"sublevel"`
-	Enabled            bool     `json:"enabled"`
-	Aura               bool     `json:"aura"`
-	Locked             bool     `json:"locked"`
-	AutocastRecordID   string   `json:"autocast_record_id,omitempty"`
-	ControllerRecordID string   `json:"controller_record_id,omitempty"`
-	GDEditLevel        uint32   `json:"gd_edit_level,omitzero"`
-	GearBonus          uint32   `json:"gear_bonus,omitzero"`
-	MaxLevel           uint32   `json:"max_level,omitzero"`
-	UltimateLevel      uint32   `json:"ultimate_level,omitzero"`
-	Description        string   `json:"description,omitempty"`
-	Current            []string `json:"current,omitempty"`
-	Next               []string `json:"next,omitempty"`
-	GDEditOnly         bool     `json:"gd_edit_only,omitzero"`
+	RecordID           string              `json:"record_id,omitempty"`
+	Name               string              `json:"name,omitempty"`
+	DisplayTag         string              `json:"display_tag,omitempty"`
+	NameResolution     SkillNameResolution `json:"name_resolution,omitempty"`
+	Mastery            string              `json:"mastery,omitempty"`
+	Category           SkillCategory       `json:"category"`
+	Level              uint32              `json:"level"`
+	LevelObserved      bool                `json:"level_observed"`
+	IsDevotion         bool                `json:"is_devotion"`
+	DevotionLevel      uint32              `json:"devotion_level"`
+	DevotionExperience uint32              `json:"devotion_experience"`
+	Sublevel           uint32              `json:"sublevel"`
+	Enabled            bool                `json:"enabled"`
+	EnabledObserved    bool                `json:"enabled_observed"`
+	Aura               bool                `json:"aura"`
+	Locked             bool                `json:"locked"`
+	AutocastRecordID   string              `json:"autocast_record_id,omitempty"`
+	ControllerRecordID string              `json:"controller_record_id,omitempty"`
+	GDEditLevel        uint32              `json:"gd_edit_level,omitzero"`
+	GearBonus          uint32              `json:"gear_bonus,omitzero"`
+	MaxLevel           uint32              `json:"max_level,omitzero"`
+	UltimateLevel      uint32              `json:"ultimate_level,omitzero"`
+	Description        string              `json:"description,omitempty"`
+	Current            []string            `json:"current,omitempty"`
+	Next               []string            `json:"next,omitempty"`
+	SaveBacked         bool                `json:"save_backed"`
+	GDEditOnly         bool                `json:"gd_edit_only,omitzero"`
+	MatchStatus        SkillMatchStatus    `json:"match_status,omitempty"`
 }
+
+type SkillCategory string
+
+func ClassifySkillCategory(recordID string, isDevotion bool) SkillCategory {
+	id := strings.ToLower(recordID)
+	switch {
+	case strings.Contains(id, "/potion"):
+		return SkillCategoryPotion
+	case strings.Contains(id, "/default/"):
+		return SkillCategoryDefault
+	case isDevotion || strings.Contains(id, "/devotion/"):
+		return SkillCategoryDevotion
+	case strings.Contains(id, "/_classtraining_"):
+		return SkillCategoryMasteryBar
+	case strings.Contains(id, "/playerclass"):
+		return SkillCategoryMastery
+	default:
+		return SkillCategoryOther
+	}
+}
+
+const (
+	SkillCategoryMastery    SkillCategory = "mastery_skill"
+	SkillCategoryMasteryBar SkillCategory = "mastery_bar"
+	SkillCategoryDevotion   SkillCategory = "devotion"
+	SkillCategoryDefault    SkillCategory = "default_action"
+	SkillCategoryPotion     SkillCategory = "potion_related"
+	SkillCategoryOther      SkillCategory = "other"
+)
+
+type SkillMatchStatus string
+
+const (
+	SkillMatchStatusMatchedRecordID SkillMatchStatus = "matched_record_id"
+	SkillMatchStatusMatchedTexture  SkillMatchStatus = "matched_texture"
+	SkillMatchStatusNoDatabase      SkillMatchStatus = "no_database"
+	SkillMatchStatusNoARZRecord     SkillMatchStatus = "no_arz_record"
+	SkillMatchStatusNoJoinKey       SkillMatchStatus = "no_join_key"
+	SkillMatchStatusNoHTMLNode      SkillMatchStatus = "no_html_node"
+	SkillMatchStatusAmbiguous       SkillMatchStatus = "ambiguous_candidates"
+	SkillMatchStatusUnusedHTMLNode  SkillMatchStatus = "unused_html_node"
+)
+
+type SkillNameResolution string
+
+const (
+	SkillNameResolutionTagOnly    SkillNameResolution = "tag_only"
+	SkillNameResolutionMissing    SkillNameResolution = "missing"
+	SkillNameResolutionNoDatabase SkillNameResolution = "no_database"
+)
 
 type Devotion struct {
 	Name       string         `json:"name"`

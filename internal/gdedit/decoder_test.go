@@ -18,7 +18,7 @@ func TestDecodeHTMLExtractsAndMapsWindowData(t *testing.T) {
 				"resistances": [{"field":"defensiveFire","label":"Fire","shown":80,"cap":80,"over":12}],
 				"equipment": [{"slot":"Head","name":"Test Helm","seed":42,"itemLevel":20},null,{"slot":"Hands","name":""}]
 			},
-			"tree": {"trees":[{"mastery":"Soldier","nodes":[{"name":"Cadence","level":3,"gear":1,"max":16,"ultimate":22,"desc":"Melee attack.","cur":["Current effect"],"next":["Next effect"],"tex":"ui/skills/icons/cadence.tex"}]}]},
+			"tree": {"trees":[{"mastery":"Soldier","nodes":[{"record_id":"records/skills/playerclass01/cadence.dbr","name":"Cadence","level":3,"gear":1,"max":16,"ultimate":22,"desc":"Melee attack.","cur":["Current effect"],"next":["Next effect"],"tex":"ui/skills/icons/cadence.tex"}]}]},
 			"devo": {"constellations":[{"name":"Fiend","bitmap":"ui/skills/devotion/fiend.tex","starsTaken":1,"starsTotal":5,"complete":false,"stars":[{"name":"Flame Torrent","button":5,"skill":true,"taken":true,"bound":{"name":"Cadence","trigger":"selfonattack_25%"}},{"name":"Fiend","button":1,"skill":false,"taken":false,"bound":null}]}]}
 			}
 		};
@@ -40,6 +40,7 @@ func TestDecodeHTMLExtractsAndMapsWindowData(t *testing.T) {
 	assert.Equal(t, uint32(42), got.Equipment[0].Seed)
 	assert.JSONEq(t, `{"slot":"Head","name":"Test Helm","seed":42,"itemLevel":20}`, string(got.Equipment[0].Raw))
 	require.Len(t, got.Skills, 1)
+	assert.Equal(t, "records/skills/playerclass01/cadence.dbr", got.Skills[0].RecordID)
 	assert.Equal(t, "Soldier", got.Skills[0].Mastery)
 	assert.Equal(t, "Cadence", got.Skills[0].Name)
 	assert.Equal(t, uint32(3), got.Skills[0].Level)

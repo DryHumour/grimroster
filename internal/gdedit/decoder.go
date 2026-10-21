@@ -33,6 +33,7 @@ type Equipment struct {
 }
 
 type SkillObservation struct {
+	RecordID      string
 	Mastery       string
 	Name          string
 	Level         uint32
@@ -114,6 +115,8 @@ type masteryTree struct {
 }
 
 type skillNode struct {
+	RecordID      string   `json:"record_id"`
+	RecordIDCamel string   `json:"recordId"`
 	Name          string   `json:"name"`
 	Description   string   `json:"desc"`
 	Level         uint32   `json:"level"`
@@ -204,6 +207,7 @@ func DecodeJSON(data []byte) (Data, error) {
 					continue
 				}
 				result.Skills = append(result.Skills, SkillObservation{
+					RecordID:      firstNonEmpty(node.RecordID, node.RecordIDCamel),
 					Mastery:       stripANSI(mastery.Mastery),
 					Name:          stripANSI(node.Name),
 					Level:         node.Level,
@@ -273,6 +277,15 @@ func DecodeJSON(data []byte) (Data, error) {
 	}
 
 	return result, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func DecodeHTML(data []byte) (Data, error) {

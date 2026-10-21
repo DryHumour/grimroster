@@ -157,16 +157,20 @@ func Decode(data []byte) (character.Character, error) {
 			}
 			result.Skills = append(result.Skills, character.Skill{
 				RecordID:           skill.Name,
+				Category:           character.ClassifySkillCategory(skill.Name, skill.DevotionLevel > 0),
 				Level:              skill.Level,
+				LevelObserved:      true,
 				IsDevotion:         skill.DevotionLevel > 0,
 				DevotionLevel:      skill.DevotionLevel,
 				DevotionExperience: skill.DevotionExperience,
 				Sublevel:           skill.Sublevel,
 				Enabled:            skill.IsEnabled,
+				EnabledObserved:    true,
 				Aura:               skill.IsAura,
 				Locked:             skill.IsLocked,
 				AutocastRecordID:   skill.Autocast,
 				ControllerRecordID: skill.Controller,
+				SaveBacked:         true,
 			})
 		}
 	}
