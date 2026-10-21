@@ -133,7 +133,7 @@ func MergeWithDatabase(grim character.Character, sheet gdedit.Data, database *ar
 	calculated.Resistances = slices.Clone(sheet.Calculated.Resistances)
 	result.Calculated = &calculated
 
-	if err := mergeSkills(&result, sheet.Skills, database); err != nil {
+	if err := mergeSkills(&result, sheet.Skills, sheet.LocalizationLanguage, database); err != nil {
 		return character.Character{}, err
 	}
 	affinityEntries := make([]devotionAffinityCalculation, 0, len(sheet.Devotions))
@@ -317,7 +317,7 @@ func factionStandingAtThreshold(threshold arz.FactionStandingThreshold, threshol
 	}
 }
 
-func mergeSkills(result *character.Character, observations []gdedit.SkillObservation, database *arz.Database) error {
+func mergeSkills(result *character.Character, observations []gdedit.SkillObservation, localizationLanguage string, database *arz.Database) error {
 	matched := make([]bool, len(observations))
 	ambiguousObservations := make([]bool, len(observations))
 	conflictingRecordIDs := make([]bool, len(observations))
@@ -465,6 +465,67 @@ func mergeSkills(result *character.Character, observations []gdedit.SkillObserva
 			}
 			matched[sheetIndex] = true
 		}
+		if localizedSkillMatchingEnabled(localizationLanguage, database) {
+			masteryByClass := matchedMasteriesByClass(result.Skills)
+			localizedByGrim := make([]map[int]struct{}, len(result.Skills))
+			localizedBySheet := make([]map[int]struct{}, len(observations))
+			localizedNames := make(map[int]string)
+			localizedNameFound := make(map[int]bool)
+			for sheetIndex, candidates := range sheetCandidates {
+				if matched[sheetIndex] || strings.TrimSpace(observations[sheetIndex].Name) == "" {
+					continue
+				}
+				for grimIndex := range candidates {
+					if matchedSkillStatus(result.Skills[grimIndex].MatchStatus) {
+						continue
+					}
+					savedName, cached := localizedNames[grimIndex]
+					nameFound := false
+					if !cached {
+						var err error
+						savedName, nameFound, err = database.LocalizedSkillDisplayName(result.Skills[grimIndex].RecordID)
+						if err != nil {
+							return fmt.Errorf("resolve localized display name for skill %q: %w", result.Skills[grimIndex].RecordID, err)
+						}
+						localizedNames[grimIndex] = savedName
+						localizedNameFound[grimIndex] = nameFound
+					} else {
+						nameFound = localizedNameFound[grimIndex]
+					}
+					if !nameFound || strings.TrimSpace(savedName) != strings.TrimSpace(observations[sheetIndex].Name) {
+						continue
+					}
+					if mastery, known := masteryByClass[skillClassDirectory(result.Skills[grimIndex].RecordID)]; known &&
+						observations[sheetIndex].Mastery != mastery {
+						continue
+					}
+					if localizedByGrim[grimIndex] == nil {
+						localizedByGrim[grimIndex] = make(map[int]struct{})
+					}
+					if localizedBySheet[sheetIndex] == nil {
+						localizedBySheet[sheetIndex] = make(map[int]struct{})
+					}
+					localizedByGrim[grimIndex][sheetIndex] = struct{}{}
+					localizedBySheet[sheetIndex][grimIndex] = struct{}{}
+				}
+			}
+			for sheetIndex, candidates := range localizedBySheet {
+				if matched[sheetIndex] || len(candidates) != 1 {
+					continue
+				}
+				var grimIndex int
+				for candidate := range candidates {
+					grimIndex = candidate
+				}
+				if len(localizedByGrim[grimIndex]) != 1 {
+					continue
+				}
+				if err := applySkillObservation(result, grimIndex, observations[sheetIndex], character.SkillMatchStatusMatchedLocalizedName); err != nil {
+					return err
+				}
+				matched[sheetIndex] = true
+			}
+		}
 		for sheetIndex, candidates := range sheetCandidates {
 			if !matched[sheetIndex] && len(candidates) > 0 {
 				ambiguousObservations[sheetIndex] = true
@@ -566,6 +627,41 @@ func recordIDsConflict(grimRecordID, sheetRecordID string) bool {
 		return false
 	}
 	return !strings.EqualFold(strings.TrimSpace(grimRecordID), strings.TrimSpace(sheetRecordID))
+}
+
+func localizedSkillMatchingEnabled(sheetLocalizationLanguage string, database *arz.Database) bool {
+	localizationLanguage, known := database.LocalizationLanguage()
+	return known &&
+		sheetLocalizationLanguage != "" &&
+		strings.EqualFold(sheetLocalizationLanguage, localizationLanguage)
+}
+
+func matchedSkillStatus(status character.SkillMatchStatus) bool {
+	return status == character.SkillMatchStatusMatchedRecordID ||
+		status == character.SkillMatchStatusMatchedTexture
+}
+
+func matchedMasteriesByClass(skills []character.Skill) map[string]string {
+	masteries := make(map[string]string)
+	conflicts := make(map[string]bool)
+	for _, skill := range skills {
+		if skill.Category != character.SkillCategoryMastery ||
+			!matchedSkillStatus(skill.MatchStatus) ||
+			skill.Mastery == "" {
+			continue
+		}
+		classID := skillClassDirectory(skill.RecordID)
+		if classID == "" || conflicts[classID] {
+			continue
+		}
+		if mastery, found := masteries[classID]; found && mastery != skill.Mastery {
+			delete(masteries, classID)
+			conflicts[classID] = true
+			continue
+		}
+		masteries[classID] = skill.Mastery
+	}
+	return masteries
 }
 
 func resolveMasteryBars(result *character.Character) {

@@ -54,6 +54,9 @@ func TestOpenGameDirUsesExpansionFactionNames(t *testing.T) {
 	name, found := database.LocalizedText("tagFactionUser2")
 	assert.True(t, found)
 	assert.Equal(t, "Expansion name", name)
+	language, known := database.LocalizationLanguage()
+	assert.True(t, known)
+	assert.Equal(t, localizationLanguageEnglish, language)
 }
 
 func TestFactionCatalogLocalizesNamesWithoutChangingFactionIDs(t *testing.T) {
