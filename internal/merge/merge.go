@@ -55,6 +55,13 @@ func Merge(grim character.Character, sheet gdedit.Data) (character.Character, er
 
 func MergeWithDatabase(grim character.Character, sheet gdedit.Data, database *arz.Database) (character.Character, error) {
 	result := grim
+	if sheet.Affinities.AllKnown() {
+		result.CurrentAffinities = sheet.Affinities
+		result.CurrentAffinitiesSource = character.AffinitySourceGDEdit
+	} else if !grim.CurrentAffinities.AllKnown() {
+		result.CurrentAffinities = character.AffinityAmounts{}
+		result.CurrentAffinitiesSource = character.AffinitySourceUnknown
+	}
 	result.Masteries = slices.Clone(grim.Masteries)
 	result.Skills = slices.Clone(grim.Skills)
 	for i := range result.Skills {
@@ -125,6 +132,9 @@ func MergeWithDatabase(grim character.Character, sheet gdedit.Data, database *ar
 		return character.Character{}, err
 	}
 	if err := mergeDevotions(&result, sheet.Devotions, database); err != nil {
+		return character.Character{}, err
+	}
+	if err := reconcileAffinityTotals(&result); err != nil {
 		return character.Character{}, err
 	}
 
@@ -541,14 +551,27 @@ func mergeDevotions(result *character.Character, observations []gdedit.Devotion,
 	}
 
 	for _, observation := range observations {
-		devotion := character.Devotion{
-			Name:       observation.Name,
-			StarsTaken: observation.StarsTaken,
-			StarsTotal: observation.StarsTotal,
-			Complete:   observation.Complete,
-			Stars:      make([]character.DevotionStar, 0, len(observation.Stars)),
-		}
 		constellations := constellationsByBitmap[normalizeTexture(observation.JoinKey)]
+		fallbackRequirements, fallbackRewards := arzaffinityAmounts(constellations)
+		requirements, requirementsSource := affinityAmountsWithFallback(
+			observation.AffinityRequirements,
+			fallbackRequirements,
+		)
+		rewards, rewardsSource := affinityAmountsWithFallback(
+			observation.AffinityRewards,
+			fallbackRewards,
+		)
+		devotion := character.Devotion{
+			Name:                       observation.Name,
+			StarsTaken:                 observation.StarsTaken,
+			StarsTotal:                 observation.StarsTotal,
+			Complete:                   observation.Complete,
+			AffinityRequirements:       requirements,
+			AffinityRequirementsSource: requirementsSource,
+			AffinityRewards:            rewards,
+			AffinityRewardsSource:      rewardsSource,
+			Stars:                      make([]character.DevotionStar, 0, len(observation.Stars)),
+		}
 		for _, observedStar := range observation.Stars {
 			star := character.DevotionStar{
 				Name:       observedStar.Name,
@@ -651,6 +674,150 @@ func mergeDevotions(result *character.Character, observations []gdedit.Devotion,
 		}
 		devotion.Complete = devotion.StarsTotal > 0 && devotion.StarsTaken == devotion.StarsTotal
 		result.Devotions = append(result.Devotions, devotion)
+	}
+	return nil
+}
+
+func arzaffinityAmounts(definitions []arz.DevotionConstellation) (character.AffinityAmounts, character.AffinityAmounts) {
+	return commonAffinityAmounts(definitions, func(definition arz.DevotionConstellation) character.AffinityAmounts {
+			return definition.AffinityRequirements
+		}), commonAffinityAmounts(definitions, func(definition arz.DevotionConstellation) character.AffinityAmounts {
+			return definition.AffinityRewards
+		})
+}
+
+func commonAffinityAmounts(
+	definitions []arz.DevotionConstellation,
+	selectAmounts func(arz.DevotionConstellation) character.AffinityAmounts,
+) character.AffinityAmounts {
+	result := character.AffinityAmounts{}
+	if len(definitions) == 0 {
+		return result
+	}
+	for _, affinity := range []character.Affinity{
+		character.AffinityAscendant,
+		character.AffinityChaos,
+		character.AffinityEldritch,
+		character.AffinityOrder,
+		character.AffinityPrimordial,
+	} {
+		var (
+			points uint32
+			found  bool
+			common = true
+		)
+		for _, definition := range definitions {
+			value, _ := selectAmounts(definition).Value(affinity)
+			if !value.Known {
+				common = false
+				break
+			}
+			if found && value.Points != points {
+				common = false
+				break
+			}
+			points = value.Points
+			found = true
+		}
+		if common && found {
+			result.Set(affinity, points)
+		}
+	}
+	return result
+}
+
+func affinityAmountsWithFallback(
+	primary, fallback character.AffinityAmounts,
+) (character.AffinityAmounts, character.AffinitySource) {
+	result := primary
+	usedPrimary, usedFallback := false, false
+	for _, affinity := range []character.Affinity{
+		character.AffinityAscendant,
+		character.AffinityChaos,
+		character.AffinityEldritch,
+		character.AffinityOrder,
+		character.AffinityPrimordial,
+	} {
+		value, _ := primary.Value(affinity)
+		if value.Known {
+			usedPrimary = true
+			continue
+		}
+		value, _ = fallback.Value(affinity)
+		if value.Known {
+			result.Set(affinity, value.Points)
+			usedFallback = true
+		}
+	}
+	switch {
+	case usedPrimary && usedFallback:
+		return result, character.AffinitySourceMixed
+	case usedPrimary:
+		return result, character.AffinitySourceGDEdit
+	case usedFallback:
+		return result, character.AffinitySourceARZ
+	default:
+		return result, character.AffinitySourceUnknown
+	}
+}
+
+func reconcileAffinityTotals(result *character.Character) error {
+	if result.CurrentAffinitiesSource == character.AffinitySourceUnknown ||
+		!result.CurrentAffinities.AllKnown() ||
+		len(result.Devotions) == 0 {
+		return nil
+	}
+
+	calculated := character.KnownZeroAffinityAmounts()
+	for _, devotion := range result.Devotions {
+		if !devotion.Complete {
+			continue
+		}
+		if !devotion.AffinityRewards.AllKnown() {
+			return nil
+		}
+		for _, affinity := range []character.Affinity{
+			character.AffinityAscendant,
+			character.AffinityChaos,
+			character.AffinityEldritch,
+			character.AffinityOrder,
+			character.AffinityPrimordial,
+		} {
+			current, _ := calculated.Value(affinity)
+			reward, _ := devotion.AffinityRewards.Value(affinity)
+			calculated.Set(affinity, current.Points+reward.Points)
+		}
+	}
+
+	for _, affinity := range []character.Affinity{
+		character.AffinityAscendant,
+		character.AffinityChaos,
+		character.AffinityEldritch,
+		character.AffinityOrder,
+		character.AffinityPrimordial,
+	} {
+		calculatedValue, _ := calculated.Value(affinity)
+		currentValue, _ := result.CurrentAffinities.Value(affinity)
+		if calculatedValue.Points == currentValue.Points {
+			continue
+		}
+		if err := addDiagnostic(
+			result,
+			character.SeverityWarning,
+			character.DiagnosticCodeDevotionAffinityTotalMismatch,
+			"Direct affinity total differs from rewards of completed constellations.",
+			fmt.Sprintf("current_affinities.%s", strings.ToLower(string(affinity))),
+			struct {
+				Source string `json:"source"`
+				Points uint32 `json:"points"`
+			}{Source: "completed_constellation_rewards", Points: calculatedValue.Points},
+			struct {
+				Source string `json:"source"`
+				Points uint32 `json:"points"`
+			}{Source: "gd_edit.devo.affinities", Points: currentValue.Points},
+		); err != nil {
+			return err
+		}
 	}
 	return nil
 }

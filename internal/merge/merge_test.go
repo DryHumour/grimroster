@@ -229,6 +229,184 @@ func TestMergeEnrichesSkillsAndDevotionBindingsFromARZ(t *testing.T) {
 	assert.Equal(t, "Cadence", got.Devotions[0].Stars[0].BoundSkill)
 }
 
+func TestMergeAffinityTotalsCountCrossroadsAndCompletedConstellations(t *testing.T) {
+	t.Parallel()
+
+	current := character.KnownZeroAffinityAmounts()
+	current.Set(character.AffinityAscendant, 1)
+	current.Set(character.AffinityEldritch, 3)
+
+	crossroadsReward := character.KnownZeroAffinityAmounts()
+	crossroadsReward.Set(character.AffinityAscendant, 1)
+	constellationReward := character.KnownZeroAffinityAmounts()
+	constellationReward.Set(character.AffinityEldritch, 3)
+	partialReward := character.KnownZeroAffinityAmounts()
+	partialReward.Set(character.AffinityChaos, 4)
+
+	sheet := gdedit.Data{
+		Affinities: current,
+		Devotions: []gdedit.Devotion{
+			{
+				Name:                 "Crossroads - Ascendant",
+				StarsTaken:           1,
+				StarsTotal:           1,
+				Complete:             true,
+				AffinityRequirements: character.KnownZeroAffinityAmounts(),
+				AffinityRewards:      crossroadsReward,
+				Stars:                []gdedit.DevotionStar{{Taken: true}},
+			},
+			{
+				Name:                 "Completed constellation",
+				StarsTaken:           1,
+				StarsTotal:           1,
+				Complete:             true,
+				AffinityRequirements: character.KnownZeroAffinityAmounts(),
+				AffinityRewards:      constellationReward,
+				Stars:                []gdedit.DevotionStar{{Taken: true}},
+			},
+			{
+				Name:                 "Partial constellation",
+				StarsTaken:           1,
+				StarsTotal:           2,
+				Complete:             false,
+				AffinityRequirements: character.KnownZeroAffinityAmounts(),
+				AffinityRewards:      partialReward,
+				Stars:                []gdedit.DevotionStar{{Taken: true}, {Taken: false}},
+			},
+		},
+	}
+
+	got, err := Merge(character.Character{}, sheet)
+	require.NoError(t, err)
+	assert.Equal(t, character.AffinitySourceGDEdit, got.CurrentAffinitiesSource)
+	assert.True(t, got.CurrentAffinities.AllKnown())
+	assert.Equal(t, uint32(1), got.CurrentAffinities.Ascendant.Points)
+	assert.Equal(t, uint32(3), got.CurrentAffinities.Eldritch.Points)
+	require.Len(t, got.Devotions, 3)
+	assert.True(t, got.Devotions[0].Complete)
+	assert.Equal(t, uint32(1), got.Devotions[0].AffinityRewards.Ascendant.Points)
+	assert.Equal(t, character.AffinitySourceGDEdit, got.Devotions[0].AffinityRewardsSource)
+	assert.True(t, got.Devotions[1].Complete)
+	assert.Equal(t, uint32(3), got.Devotions[1].AffinityRewards.Eldritch.Points)
+	assert.False(t, got.Devotions[2].Complete)
+	assert.Equal(t, uint32(4), got.Devotions[2].AffinityRewards.Chaos.Points)
+	assert.Empty(t, got.Diagnostics)
+}
+
+func TestMergeWarnsWhenDirectAffinityTotalsConflictWithCompletedRewards(t *testing.T) {
+	t.Parallel()
+
+	current := character.KnownZeroAffinityAmounts()
+	current.Set(character.AffinityEldritch, 2)
+	rewards := character.KnownZeroAffinityAmounts()
+	rewards.Set(character.AffinityEldritch, 3)
+	sheet := gdedit.Data{
+		Affinities: current,
+		Devotions: []gdedit.Devotion{{
+			Name:                 "Completed constellation",
+			StarsTaken:           1,
+			StarsTotal:           1,
+			AffinityRequirements: character.KnownZeroAffinityAmounts(),
+			AffinityRewards:      rewards,
+			Stars:                []gdedit.DevotionStar{{Taken: true}},
+		}},
+	}
+
+	got, err := Merge(character.Character{}, sheet)
+	require.NoError(t, err)
+	require.Len(t, got.Diagnostics, 1)
+	assert.Equal(t, character.DiagnosticCodeDevotionAffinityTotalMismatch, got.Diagnostics[0].Code)
+	assert.Equal(t, "current_affinities.eldritch", got.Diagnostics[0].Field)
+	assert.JSONEq(t, `{"source":"completed_constellation_rewards","points":3}`, string(got.Diagnostics[0].GrimValue))
+	assert.JSONEq(t, `{"source":"gd_edit.devo.affinities","points":2}`, string(got.Diagnostics[0].GDEditValue))
+}
+
+func TestMergeKeepsMissingAffinitySourcesUnknown(t *testing.T) {
+	t.Parallel()
+
+	got, err := Merge(character.Character{}, gdedit.Data{Devotions: []gdedit.Devotion{{
+		Name:       "Partial constellation",
+		StarsTotal: 2,
+		Stars:      []gdedit.DevotionStar{{Taken: true}, {Taken: false}},
+	}}})
+	require.NoError(t, err)
+	assert.Equal(t, character.AffinitySourceUnknown, got.CurrentAffinitiesSource)
+	assert.False(t, got.CurrentAffinities.AllKnown())
+	assert.False(t, got.CurrentAffinities.Ascendant.Known)
+	require.Len(t, got.Devotions, 1)
+	assert.Equal(t, character.AffinitySourceUnknown, got.Devotions[0].AffinityRequirementsSource)
+	assert.Equal(t, character.AffinitySourceUnknown, got.Devotions[0].AffinityRewardsSource)
+	assert.False(t, got.Devotions[0].AffinityRequirements.AllKnown())
+	assert.False(t, got.Devotions[0].AffinityRewards.AllKnown())
+	assert.Empty(t, got.Diagnostics)
+}
+
+func TestMergeUsesGDeditAffinityDataBeforeARZFallback(t *testing.T) {
+	t.Parallel()
+
+	const bitmap = "ui/skills/devotion/test_constellation.tex"
+	database, err := arz.New(arzlib.Encode([]arzlib.EncRec{
+		{
+			Name: "records/ui/skills/devotion/constellations/constellation007.dbr",
+			Ints: map[string][]int32{
+				"affinityRequired1": {5},
+				"affinityRequired2": {0},
+				"affinityRequired3": {0},
+				"affinityGiven1":    {2},
+				"affinityGiven2":    {0},
+				"affinityGiven3":    {0},
+			},
+			Strings: map[string][]string{
+				"constellationDisplayTag": {"tagTestConstellation"},
+				"constellationBackground": {"records/ui/skills/devotion/backgrounds/test.dbr"},
+				"affinityRequiredName1":   {"Order"},
+				"affinityGivenName1":      {"Primordial"},
+			},
+		},
+		{
+			Name: "records/ui/skills/devotion/backgrounds/test.dbr",
+			Strings: map[string][]string{
+				"bitmapName": {bitmap},
+			},
+		},
+	}))
+	require.NoError(t, err)
+
+	observation := gdedit.Devotion{
+		Name:       "Test constellation",
+		JoinKey:    bitmap,
+		StarsTaken: 1,
+		StarsTotal: 1,
+		Complete:   true,
+		Stars:      []gdedit.DevotionStar{{Taken: true}},
+	}
+	got, err := MergeWithDatabase(character.Character{}, gdedit.Data{
+		Devotions: []gdedit.Devotion{observation},
+	}, database)
+	require.NoError(t, err)
+	require.Len(t, got.Devotions, 1)
+	assert.Equal(t, character.AffinitySourceARZ, got.Devotions[0].AffinityRequirementsSource)
+	assert.Equal(t, uint32(5), got.Devotions[0].AffinityRequirements.Order.Points)
+	assert.Equal(t, character.AffinitySourceARZ, got.Devotions[0].AffinityRewardsSource)
+	assert.Equal(t, uint32(2), got.Devotions[0].AffinityRewards.Primordial.Points)
+
+	htmlRequirements := character.KnownZeroAffinityAmounts()
+	htmlRequirements.Set(character.AffinityChaos, 7)
+	htmlRewards := character.KnownZeroAffinityAmounts()
+	htmlRewards.Set(character.AffinityChaos, 3)
+	observation.AffinityRequirements = htmlRequirements
+	observation.AffinityRewards = htmlRewards
+	got, err = MergeWithDatabase(character.Character{}, gdedit.Data{
+		Devotions: []gdedit.Devotion{observation},
+	}, database)
+	require.NoError(t, err)
+	require.Len(t, got.Devotions, 1)
+	assert.Equal(t, character.AffinitySourceGDEdit, got.Devotions[0].AffinityRequirementsSource)
+	assert.Equal(t, uint32(7), got.Devotions[0].AffinityRequirements.Chaos.Points)
+	assert.Equal(t, character.AffinitySourceGDEdit, got.Devotions[0].AffinityRewardsSource)
+	assert.Equal(t, uint32(3), got.Devotions[0].AffinityRewards.Chaos.Points)
+}
+
 func TestMergeWarnsForUnmatchedInvestedSkillsButNotUninvestedNodes(t *testing.T) {
 	t.Parallel()
 

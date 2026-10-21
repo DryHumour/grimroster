@@ -108,6 +108,36 @@ func TestStringFieldRejectsUnexpectedFieldShape(t *testing.T) {
 	assert.ErrorContains(t, err, "expected one")
 }
 
+func TestInt32FieldValidatesFieldShape(t *testing.T) {
+	t.Parallel()
+
+	db, err := arz.New(arzlib.Encode([]arzlib.EncRec{
+		{
+			Name: "records/test/valid.dbr",
+			Ints: map[string][]int32{"affinityRequired1": {6}},
+		},
+		{
+			Name:    "records/test/wrong-type.dbr",
+			Strings: map[string][]string{"affinityRequired1": {"six"}},
+		},
+		{
+			Name: "records/test/multiple-values.dbr",
+			Ints: map[string][]int32{"affinityRequired1": {1, 2}},
+		},
+	}))
+	require.NoError(t, err)
+
+	points, found, err := db.Int32Field("records/test/valid.dbr", "affinityRequired1")
+	require.NoError(t, err)
+	assert.True(t, found)
+	assert.Equal(t, int32(6), points)
+
+	_, _, err = db.Int32Field("records/test/wrong-type.dbr", "affinityRequired1")
+	assert.ErrorContains(t, err, "is not an int32")
+	_, _, err = db.Int32Field("records/test/multiple-values.dbr", "affinityRequired1")
+	assert.ErrorContains(t, err, "expected one")
+}
+
 func TestStringFieldsWithPrefixAndRecordIDsWithPrefix(t *testing.T) {
 	t.Parallel()
 
@@ -161,10 +191,21 @@ func TestDevotionConstellationsJoinsBackgroundAndButtonRecords(t *testing.T) {
 	db, err := arz.New(arzlib.Encode([]arzlib.EncRec{
 		{
 			Name: "records/ui/skills/devotion/constellations/constellation001.dbr",
+			Ints: map[string][]int32{
+				"affinityRequired1": {1},
+				"affinityRequired2": {0},
+				"affinityRequired3": {0},
+				"affinityGiven1":    {3},
+				"affinityGiven2":    {2},
+				"affinityGiven3":    {0},
+			},
 			Strings: map[string][]string{
 				"constellationDisplayTag": {"tagConstellation"},
 				"constellationBackground": {"records/ui/skills/devotion/backgrounds/constellation001.dbr"},
 				"devotionButton1":         {"records/ui/skills/devotion/constellations/button001.dbr"},
+				"affinityRequiredName1":   {"Chaos"},
+				"affinityGivenName1":      {"Ascendant"},
+				"affinityGivenName2":      {"Eldritch"},
 			},
 		},
 		{
@@ -200,6 +241,11 @@ func TestDevotionConstellationsJoinsBackgroundAndButtonRecords(t *testing.T) {
 	require.Len(t, constellations, 1)
 	assert.Equal(t, "tagConstellation", constellations[0].DisplayTag)
 	assert.Equal(t, "ui/skills/devotion/constellation001.tex", constellations[0].Bitmap)
+	assert.True(t, constellations[0].AffinityRequirements.AllKnown())
+	assert.Equal(t, uint32(1), constellations[0].AffinityRequirements.Chaos.Points)
+	assert.True(t, constellations[0].AffinityRewards.AllKnown())
+	assert.Equal(t, uint32(3), constellations[0].AffinityRewards.Ascendant.Points)
+	assert.Equal(t, uint32(2), constellations[0].AffinityRewards.Eldritch.Points)
 	assert.Equal(t, map[uint32][]string{
 		1: {"records/skills/devotion/tier1_01a.dbr"},
 		2: {"records/skills/devotion/tier1_01b.dbr"},

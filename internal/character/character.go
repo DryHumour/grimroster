@@ -13,23 +13,25 @@ const (
 )
 
 type Character struct {
-	Name        string       `json:"name"`
-	ClassID     string       `json:"class_id"`
-	ClassName   string       `json:"class_name,omitempty"`
-	ClassTag    string       `json:"class_tag,omitempty"`
-	Masteries   []string     `json:"masteries,omitempty"`
-	Level       uint32       `json:"level"`
-	Gender      Gender       `json:"gender"`
-	Hardcore    bool         `json:"hardcore"`
-	Expansions  uint8        `json:"expansions"`
-	Expansion   string       `json:"expansion,omitempty"`
-	Difficulty  string       `json:"difficulty,omitempty"`
-	Progress    Progression  `json:"progression"`
-	Inventory   Inventory    `json:"inventory"`
-	Skills      []Skill      `json:"skills,omitempty"`
-	Devotions   []Devotion   `json:"devotions,omitempty"`
-	Calculated  *Calculated  `json:"calculated,omitempty"`
-	Diagnostics []Diagnostic `json:"diagnostics,omitempty"`
+	Name                    string          `json:"name"`
+	ClassID                 string          `json:"class_id"`
+	ClassName               string          `json:"class_name,omitempty"`
+	ClassTag                string          `json:"class_tag,omitempty"`
+	Masteries               []string        `json:"masteries,omitempty"`
+	Level                   uint32          `json:"level"`
+	Gender                  Gender          `json:"gender"`
+	Hardcore                bool            `json:"hardcore"`
+	Expansions              uint8           `json:"expansions"`
+	Expansion               string          `json:"expansion,omitempty"`
+	Difficulty              string          `json:"difficulty,omitempty"`
+	Progress                Progression     `json:"progression"`
+	Inventory               Inventory       `json:"inventory"`
+	Skills                  []Skill         `json:"skills,omitempty"`
+	Devotions               []Devotion      `json:"devotions,omitempty"`
+	CurrentAffinities       AffinityAmounts `json:"current_affinities"`
+	CurrentAffinitiesSource AffinitySource  `json:"current_affinities_source,omitempty"`
+	Calculated              *Calculated     `json:"calculated,omitempty"`
+	Diagnostics             []Diagnostic    `json:"diagnostics,omitempty"`
 }
 
 type Progression struct {
@@ -81,17 +83,18 @@ const (
 )
 
 const (
-	DiagnosticCodeCharacterNameMismatch        = "character.name_mismatch"
-	DiagnosticCodeCharacterLevelMismatch       = "character.level_mismatch"
-	DiagnosticCodeGrimBlockDecodingError       = "grim.block_decoding_error"
-	DiagnosticCodeGrimBlockMissing             = "grim.block_missing"
-	DiagnosticCodeEquipmentUnmatched           = "equipment.unmatched"
-	DiagnosticCodeEquipmentSlotMismatch        = "equipment.slot_mismatch"
-	DiagnosticCodeEquipmentDisplayNameMismatch = "equipment.display_name_mismatch"
-	DiagnosticCodeSkillLevelMismatch           = "skill.level_mismatch"
-	DiagnosticCodeSkillUnmatchedInvested       = "skill.unmatched_invested"
-	DiagnosticCodeDevotionStateMismatch        = "devotion.star_state_mismatch"
-	DiagnosticCodeDevotionBindingMismatch      = "devotion.binding_mismatch"
+	DiagnosticCodeCharacterNameMismatch         = "character.name_mismatch"
+	DiagnosticCodeCharacterLevelMismatch        = "character.level_mismatch"
+	DiagnosticCodeGrimBlockDecodingError        = "grim.block_decoding_error"
+	DiagnosticCodeGrimBlockMissing              = "grim.block_missing"
+	DiagnosticCodeEquipmentUnmatched            = "equipment.unmatched"
+	DiagnosticCodeEquipmentSlotMismatch         = "equipment.slot_mismatch"
+	DiagnosticCodeEquipmentDisplayNameMismatch  = "equipment.display_name_mismatch"
+	DiagnosticCodeSkillLevelMismatch            = "skill.level_mismatch"
+	DiagnosticCodeSkillUnmatchedInvested        = "skill.unmatched_invested"
+	DiagnosticCodeDevotionStateMismatch         = "devotion.star_state_mismatch"
+	DiagnosticCodeDevotionBindingMismatch       = "devotion.binding_mismatch"
+	DiagnosticCodeDevotionAffinityTotalMismatch = "devotion.affinity_total_mismatch"
 )
 
 type Diagnostic struct {
@@ -192,12 +195,100 @@ const (
 )
 
 type Devotion struct {
-	Name       string         `json:"name"`
-	StarsTaken uint32         `json:"stars_taken"`
-	StarsTotal uint32         `json:"stars_total"`
-	Complete   bool           `json:"complete"`
-	Stars      []DevotionStar `json:"stars"`
+	Name                       string          `json:"name"`
+	StarsTaken                 uint32          `json:"stars_taken"`
+	StarsTotal                 uint32          `json:"stars_total"`
+	Complete                   bool            `json:"complete"`
+	AffinityRequirements       AffinityAmounts `json:"affinity_requirements"`
+	AffinityRequirementsSource AffinitySource  `json:"affinity_requirements_source,omitempty"`
+	AffinityRewards            AffinityAmounts `json:"affinity_rewards"`
+	AffinityRewardsSource      AffinitySource  `json:"affinity_rewards_source,omitempty"`
+	Stars                      []DevotionStar  `json:"stars"`
 }
+
+type Affinity string
+
+const (
+	AffinityAscendant  Affinity = "Ascendant"
+	AffinityChaos      Affinity = "Chaos"
+	AffinityEldritch   Affinity = "Eldritch"
+	AffinityOrder      Affinity = "Order"
+	AffinityPrimordial Affinity = "Primordial"
+)
+
+type AffinityValue struct {
+	Points uint32 `json:"points"`
+	Known  bool   `json:"known"`
+}
+
+type AffinityAmounts struct {
+	Ascendant  AffinityValue `json:"ascendant"`
+	Chaos      AffinityValue `json:"chaos"`
+	Eldritch   AffinityValue `json:"eldritch"`
+	Order      AffinityValue `json:"order"`
+	Primordial AffinityValue `json:"primordial"`
+}
+
+func KnownZeroAffinityAmounts() AffinityAmounts {
+	return AffinityAmounts{
+		Ascendant:  AffinityValue{Known: true},
+		Chaos:      AffinityValue{Known: true},
+		Eldritch:   AffinityValue{Known: true},
+		Order:      AffinityValue{Known: true},
+		Primordial: AffinityValue{Known: true},
+	}
+}
+
+func (a *AffinityAmounts) Set(affinity Affinity, points uint32) bool {
+	var value *AffinityValue
+	switch {
+	case strings.EqualFold(string(affinity), string(AffinityAscendant)):
+		value = &a.Ascendant
+	case strings.EqualFold(string(affinity), string(AffinityChaos)):
+		value = &a.Chaos
+	case strings.EqualFold(string(affinity), string(AffinityEldritch)):
+		value = &a.Eldritch
+	case strings.EqualFold(string(affinity), string(AffinityOrder)):
+		value = &a.Order
+	case strings.EqualFold(string(affinity), string(AffinityPrimordial)):
+		value = &a.Primordial
+	default:
+		return false
+	}
+	value.Points = points
+	value.Known = true
+	return true
+}
+
+func (a AffinityAmounts) Value(affinity Affinity) (AffinityValue, bool) {
+	switch {
+	case strings.EqualFold(string(affinity), string(AffinityAscendant)):
+		return a.Ascendant, true
+	case strings.EqualFold(string(affinity), string(AffinityChaos)):
+		return a.Chaos, true
+	case strings.EqualFold(string(affinity), string(AffinityEldritch)):
+		return a.Eldritch, true
+	case strings.EqualFold(string(affinity), string(AffinityOrder)):
+		return a.Order, true
+	case strings.EqualFold(string(affinity), string(AffinityPrimordial)):
+		return a.Primordial, true
+	default:
+		return AffinityValue{}, false
+	}
+}
+
+func (a AffinityAmounts) AllKnown() bool {
+	return a.Ascendant.Known && a.Chaos.Known && a.Eldritch.Known && a.Order.Known && a.Primordial.Known
+}
+
+type AffinitySource string
+
+const (
+	AffinitySourceUnknown AffinitySource = "unknown"
+	AffinitySourceGDEdit  AffinitySource = "gd_edit"
+	AffinitySourceARZ     AffinitySource = "arz"
+	AffinitySourceMixed   AffinitySource = "mixed"
+)
 
 type DevotionStar struct {
 	Name               string `json:"name"`

@@ -188,6 +188,13 @@ func TestCharacterJSONFieldNames(t *testing.T) {
 				}
 			}],
 			"bags": []
+		},
+		"current_affinities": {
+			"ascendant": {"points": 0, "known": false},
+			"chaos": {"points": 0, "known": false},
+			"eldritch": {"points": 0, "known": false},
+			"order": {"points": 0, "known": false},
+			"primordial": {"points": 0, "known": false}
 		}
 	}`, string(data))
 }

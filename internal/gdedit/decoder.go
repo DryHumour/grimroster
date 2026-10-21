@@ -23,6 +23,7 @@ type Data struct {
 	Equipment  []Equipment
 	Skills     []SkillObservation
 	Devotions  []Devotion
+	Affinities character.AffinityAmounts
 }
 
 type Equipment struct {
@@ -47,12 +48,14 @@ type SkillObservation struct {
 }
 
 type Devotion struct {
-	Name       string
-	JoinKey    string
-	StarsTaken uint32
-	StarsTotal uint32
-	Complete   bool
-	Stars      []DevotionStar
+	Name                 string
+	JoinKey              string
+	StarsTaken           uint32
+	StarsTotal           uint32
+	Complete             bool
+	AffinityRequirements character.AffinityAmounts
+	AffinityRewards      character.AffinityAmounts
+	Stars                []DevotionStar
 }
 
 type DevotionStar struct {
@@ -129,16 +132,24 @@ type skillNode struct {
 }
 
 type devo struct {
+	Affinities     []affinityValue         `json:"affinities"`
 	Constellations []devotionConstellation `json:"constellations"`
 }
 
 type devotionConstellation struct {
-	Name       string         `json:"name"`
-	Bitmap     string         `json:"bitmap"`
-	StarsTaken uint32         `json:"starsTaken"`
-	StarsTotal uint32         `json:"starsTotal"`
-	Complete   bool           `json:"complete"`
-	Stars      []devotionStar `json:"stars"`
+	Name       string          `json:"name"`
+	Bitmap     string          `json:"bitmap"`
+	StarsTaken uint32          `json:"starsTaken"`
+	StarsTotal uint32          `json:"starsTotal"`
+	Complete   bool            `json:"complete"`
+	Affinity   []affinityValue `json:"affinity"`
+	Required   []affinityValue `json:"required"`
+	Stars      []devotionStar  `json:"stars"`
+}
+
+type affinityValue struct {
+	Name   string `json:"name"`
+	Points uint32 `json:"points"`
 }
 
 type devotionStar struct {
@@ -224,14 +235,17 @@ func DecodeJSON(data []byte) (Data, error) {
 	}
 
 	if input.Devo != nil {
+		result.Affinities = affinityAmountsFromJSON(input.Devo.Affinities)
 		for _, constellation := range input.Devo.Constellations {
 			devotion := Devotion{
-				Name:       stripANSI(constellation.Name),
-				JoinKey:    constellation.Bitmap,
-				StarsTaken: constellation.StarsTaken,
-				StarsTotal: constellation.StarsTotal,
-				Complete:   constellation.Complete,
-				Stars:      make([]DevotionStar, 0, len(constellation.Stars)),
+				Name:                 stripANSI(constellation.Name),
+				JoinKey:              constellation.Bitmap,
+				StarsTaken:           constellation.StarsTaken,
+				StarsTotal:           constellation.StarsTotal,
+				Complete:             constellation.Complete,
+				AffinityRequirements: affinityAmountsFromJSON(constellation.Required),
+				AffinityRewards:      affinityAmountsFromJSON(constellation.Affinity),
+				Stars:                make([]DevotionStar, 0, len(constellation.Stars)),
 			}
 			for _, star := range constellation.Stars {
 				var bound, trigger string
@@ -277,6 +291,19 @@ func DecodeJSON(data []byte) (Data, error) {
 	}
 
 	return result, nil
+}
+
+func affinityAmountsFromJSON(entries []affinityValue) character.AffinityAmounts {
+	if entries == nil {
+		return character.AffinityAmounts{}
+	}
+	result := character.KnownZeroAffinityAmounts()
+	for _, entry := range entries {
+		if !result.Set(character.Affinity(stripANSI(entry.Name)), entry.Points) {
+			return character.AffinityAmounts{}
+		}
+	}
+	return result
 }
 
 func firstNonEmpty(values ...string) string {
